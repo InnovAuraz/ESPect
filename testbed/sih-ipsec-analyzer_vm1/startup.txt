@@ -1,0 +1,10 @@
+sudo -v
+sudo systemctl start strongswan
+sudo swanctl --list-conns
+sudo swanctl --list-sas
+ping -c 2 192.168.160.129
+
+cd ~/sih-ipsec-analyzer
+source .venv/bin/activate
+
+sudo ip addr add 10.10.2.1/32 dev ens34

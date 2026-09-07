@@ -1,0 +1,66 @@
+version: 1
+
+parameters:
+  ipsec_mode:
+    - transport
+    - tunnel
+
+  encryption:
+    - aes128-cbc
+    - aes256-cbc
+    - aes128-gcm16
+    - aes256-gcm16
+
+  integrity:
+    - sha256
+    - sha384
+    - sha512
+    - none-aead
+
+  dh_group:
+    - modp2048
+    - modp3072
+    - modp4096
+    - ecp256
+    - ecp384
+
+  pfs:
+    - true
+    - false
+
+  ip_version:
+    - ipv4
+    - ipv6
+
+  traffic_type:
+    - voip
+    - whatsapp
+    - email
+    - web
+    - icmp
+    - video
+
+traffic:
+  icmp:
+    role_a: sender
+    role_b: receiver
+
+  web:
+    role_a: sender
+    role_b: receiver
+
+  email:
+    role_a: sender
+    role_b: receiver
+
+  video:
+    role_a: sender
+    role_b: receiver
+
+  voip:
+    role_a: peer
+    role_b: peer
+
+  whatsapp:
+    role_a: sender
+    role_b: receiver
