@@ -29,6 +29,16 @@ class IPsecResponse(BaseModel):
     mode: str | None
 
 
+class CaptureSummaryResponse(BaseModel):
+    total_packets: int
+    total_bytes: int
+    capture_duration: float
+    packets_per_second: float
+    bytes_per_second: float
+    mean_packet_size: float
+    protocol_counts: dict[str, int]
+
+
 class TrafficResponse(BaseModel):
     predicted_type: str
     confidence: float = Field(ge=0.0, le=1.0)
@@ -48,6 +58,7 @@ class SecurityResponse(BaseModel):
 
 
 class AnalysisResponse(BaseModel):
+    capture_summary: CaptureSummaryResponse
     ipsec: IPsecResponse
     traffic: TrafficResponse
     security: SecurityResponse

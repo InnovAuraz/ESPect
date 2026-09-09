@@ -33,9 +33,14 @@ class Trainer:
 
 if __name__ == "__main__":
     dataset = Dataset(
-        "C:/Users/sneha/Desktop/MyDocuments/PythonCodes/ESPect/testbed/sih-ipsec-analyzer_vm1/dataset/",
+        "../../testbed/sih-ipsec-analyzer_vm1/dataset",
         "training",
     )
+
+    print("Building dataset (extracting features from PCAPs)...")
+    dataset.build()
+    print(f"  Train: {len(dataset.train)} samples")
+    print(f"  Test:  {len(dataset.test)} samples")
 
     trainer = Trainer(dataset)
     trainer.train()

@@ -10,6 +10,7 @@ from src.security import SecurityAssessor
 
 from .schemas import (
     AnalysisResponse,
+    CaptureSummaryResponse,
     IPsecResponse,
     SecurityFindingResponse,
     SecurityResponse,
@@ -48,7 +49,10 @@ class ApplicationAnalyzer:
             ipsec_result
         )
 
+        capture_summary = self._capture_summary(packets)
+
         return AnalysisResponse(
+            capture_summary=capture_summary,
             ipsec=IPsecResponse(
                 ip_version=ipsec_result.ip_version,
                 ike_detected=ipsec_result.ike_detected,
@@ -110,3 +114,40 @@ class ApplicationAnalyzer:
             "predicted_type": prediction,
             "confidence": max(probabilities),
         }
+
+    @staticmethod
+    def _capture_summary(
+        packets: list,
+    ) -> CaptureSummaryResponse:
+        total_packets = len(packets)
+        total_bytes = sum(p.length for p in packets)
+
+        if total_packets > 1:
+            duration = packets[-1].timestamp - packets[0].timestamp
+        else:
+            duration = 0.0
+
+        protocol_counts: dict[str, int] = {}
+        for p in packets:
+            protocol_counts[p.protocol] = (
+                protocol_counts.get(p.protocol, 0) + 1
+            )
+
+        return CaptureSummaryResponse(
+            total_packets=total_packets,
+            total_bytes=total_bytes,
+            capture_duration=round(duration, 3),
+            packets_per_second=(
+                round(total_packets / duration, 2)
+                if duration > 0 else 0.0
+            ),
+            bytes_per_second=(
+                round(total_bytes / duration, 2)
+                if duration > 0 else 0.0
+            ),
+            mean_packet_size=(
+                round(total_bytes / total_packets, 1)
+                if total_packets > 0 else 0.0
+            ),
+            protocol_counts=protocol_counts,
+        )

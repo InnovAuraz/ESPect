@@ -1,18 +1,10 @@
-import { EmptyIcon } from "./Icons";
-
 export default function EmptyState() {
   return (
-    <div className="panel">
-      <div className="empty-state">
-        <div className="empty-state-icon">
-          <EmptyIcon />
-        </div>
-        <div className="empty-state-title">No analysis yet</div>
-        <p className="empty-state-desc">
-          Select a .pcap or .pcapng capture above and run an analysis to see
-          IPsec configuration, traffic classification, and a security
-          assessment here.
-        </p>
+    <div className="empty-state">
+      <div className="empty-icon">🔒</div>
+      <div className="empty-title">No analysis yet</div>
+      <div className="empty-desc">
+        Upload a PCAP file to analyze IPsec VPN traffic, classify encrypted protocols, and assess security posture.
       </div>
     </div>
   );

@@ -1,41 +1,32 @@
-import { CheckIcon } from "./Icons";
-
 export default function SecurityFindings({ findings }) {
   return (
-    <div className="panel span-2">
-      <div className="panel-title">Security Findings</div>
-
-      {(!findings || findings.length === 0) ? (
-        <div className="findings-empty">
-          <CheckIcon />
-          No security findings detected.
-        </div>
-      ) : (
-        <div className="findings-list">
-          {findings.map((finding, index) => (
-            <div
-              className={`finding-card ${finding.severity}`}
-              key={`${finding.title}-${index}`}
-            >
-              <span className={`finding-severity ${finding.severity}`}>
-                {finding.severity}
-              </span>
-              <div className="finding-title">{finding.title}</div>
-              <div className="finding-description">{finding.description}</div>
-              {finding.recommendation && (
-                <>
-                  <div className="finding-recommendation-label">
-                    Recommendation
-                  </div>
-                  <div className="finding-recommendation">
-                    {finding.recommendation}
-                  </div>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+    <div className="card">
+      <div className="card-header">
+        <span className="card-title">
+          <span className="card-title-icon">⚠️</span>
+          Security Findings
+        </span>
+      </div>
+      <div className="card-body">
+        {findings.length === 0 ? (
+          <div className="no-findings">✓ No security issues detected</div>
+        ) : (
+          <div className="findings-list">
+            {findings.map((f, i) => (
+              <div key={i} className={`finding-item severity-${f.severity.toLowerCase()}`}>
+                <div className="finding-header">
+                  <span className="finding-title">{f.title}</span>
+                  <span className={`severity-tag ${f.severity.toLowerCase()}`}>{f.severity}</span>
+                </div>
+                <div className="finding-desc">{f.description}</div>
+                {f.recommendation && (
+                  <div className="finding-rec">→ {f.recommendation}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

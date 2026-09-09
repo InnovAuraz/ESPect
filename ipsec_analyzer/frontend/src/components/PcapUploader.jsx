@@ -1,108 +1,60 @@
 import { useRef, useState } from "react";
-import { UploadIcon } from "./Icons";
+import { formatBytes } from "../utils/format";
 
-const ACCEPTED_EXTENSIONS = [".pcap", ".pcapng"];
-
-function hasAcceptedExtension(filename) {
-  const lower = filename.toLowerCase();
-  return ACCEPTED_EXTENSIONS.some((ext) => lower.endsWith(ext));
-}
-
-export default function PcapUploader({
-  selectedFile,
-  onFileSelected,
-  onClearFile,
-  onAnalyze,
-  isAnalyzing,
-}) {
+export default function PcapUploader({ selectedFile, onFileSelected, onClearFile, onAnalyze, isAnalyzing }) {
   const inputRef = useRef(null);
-  const [dragActive, setDragActive] = useState(false);
-  const [validationError, setValidationError] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
 
-  function handleFiles(fileList) {
-    const file = fileList?.[0];
-    if (!file) return;
-
-    if (!hasAcceptedExtension(file.name)) {
-      setValidationError(
-        "Unsupported file type. Please choose a .pcap or .pcapng file."
-      );
-      return;
-    }
-
-    setValidationError(null);
-    onFileSelected(file);
+  function handleDrop(e) {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) onFileSelected(file);
   }
 
-  function handleDrop(event) {
-    event.preventDefault();
-    setDragActive(false);
-    handleFiles(event.dataTransfer.files);
-  }
+  function handleDragOver(e) { e.preventDefault(); setDragOver(true); }
+  function handleDragLeave() { setDragOver(false); }
+  function handleClick() { inputRef.current?.click(); }
+  function handleChange(e) { if (e.target.files?.[0]) onFileSelected(e.target.files[0]); }
 
   return (
-    <div className="panel">
-      <div className="panel-title">PCAP Upload</div>
+    <div
+      className={`upload-zone ${dragOver ? "drag-over" : ""}`}
+      onClick={!selectedFile ? handleClick : undefined}
+      onDrop={handleDrop}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".pcap,.pcapng"
+        onChange={handleChange}
+        style={{ display: "none" }}
+      />
 
-      <label
-        className={`uploader-drop${dragActive ? " drag-active" : ""}`}
-        onDragOver={(event) => {
-          event.preventDefault();
-          setDragActive(true);
-        }}
-        onDragLeave={() => setDragActive(false)}
-        onDrop={handleDrop}
-      >
-        <div className="uploader-icon">
-          <UploadIcon />
-        </div>
-        <div className="uploader-primary">
-          Drop PCAP file here, or{" "}
-          <strong style={{ color: "var(--accent)" }}>choose a file</strong>
-        </div>
-        <div className="uploader-secondary">.pcap / .pcapng</div>
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".pcap,.pcapng"
-          onChange={(event) => handleFiles(event.target.files)}
-        />
-      </label>
-
-      {validationError && (
-        <div style={{ marginTop: 10, fontSize: "0.8rem", color: "var(--status-critical)" }}>
-          {validationError}
-        </div>
+      {!selectedFile ? (
+        <>
+          <div className="upload-icon">📁</div>
+          <div className="upload-title">Drop a PCAP file here, or click to browse</div>
+          <div className="upload-hint">Supports .pcap and .pcapng files</div>
+        </>
+      ) : (
+        <>
+          <div className="upload-icon">📄</div>
+          <div className="upload-title">Ready to analyze</div>
+          <div className="upload-file-info">
+            <span className="file-badge">
+              {selectedFile.name}
+              <span className="file-size">{formatBytes(selectedFile.size)}</span>
+            </span>
+            <button className="btn-analyze" onClick={onAnalyze} disabled={isAnalyzing}>
+              {isAnalyzing ? "Analyzing…" : "Analyze"}
+            </button>
+            <button className="btn-clear" onClick={onClearFile}>Clear</button>
+          </div>
+        </>
       )}
-
-      {selectedFile && (
-        <div className="uploader-selected">
-          <span className="uploader-selected-name">{selectedFile.name}</span>
-          <button
-            type="button"
-            className="uploader-clear"
-            title="Remove file"
-            onClick={() => {
-              onClearFile();
-              if (inputRef.current) inputRef.current.value = "";
-            }}
-          >
-            &times;
-          </button>
-        </div>
-      )}
-
-      <div className="uploader-actions">
-        <button
-          type="button"
-          className="btn btn-primary"
-          disabled={!selectedFile || isAnalyzing}
-          onClick={onAnalyze}
-        >
-          {isAnalyzing && <span className="spinner" />}
-          {isAnalyzing ? "Analyzing..." : "Analyze PCAP"}
-        </button>
-      </div>
     </div>
   );
 }

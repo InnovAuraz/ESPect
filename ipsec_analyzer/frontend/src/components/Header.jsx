@@ -1,26 +1,20 @@
-import { ShieldIcon } from "./Icons";
-import BackendStatus from "./BackendStatus";
-
 export default function Header({ status, onRefresh, isChecking }) {
+  const label = isChecking ? "Connecting…" : status === "online" ? "Online" : "Offline";
+  const dotClass = isChecking ? "checking" : status === "online" ? "online" : "offline";
+
   return (
     <header className="header">
       <div className="header-brand">
-        <div className="header-mark">
-          <ShieldIcon />
-        </div>
+        <div className="header-logo">E</div>
         <div>
-          <h1 className="header-title">ESPect</h1>
-          <p className="header-subtitle">
-            AI-Powered IPsec VPN Protocol Analyzer
-          </p>
+          <div className="header-title">ESPect</div>
+          <div className="header-subtitle">IPsec Protocol Analyzer</div>
         </div>
       </div>
-
-      <BackendStatus
-        status={status}
-        onRefresh={onRefresh}
-        isChecking={isChecking}
-      />
+      <button className="header-status" onClick={onRefresh} title="Click to refresh">
+        <span className={`status-dot ${dotClass}`} />
+        {label}
+      </button>
     </header>
   );
 }

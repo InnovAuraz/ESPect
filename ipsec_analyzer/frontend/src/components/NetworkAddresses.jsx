@@ -5,30 +5,30 @@ export default function NetworkAddresses({ ipsec }) {
   const destinations = displayList(ipsec.destination_addresses);
 
   return (
-    <div className="panel span-2">
-      <div className="panel-title">Network Information</div>
-      <div className="dashboard-grid" style={{ gap: 24 }}>
-        <div>
-          <div className="subsection-title">Source Addresses</div>
-          <AddressList addresses={sources} />
-        </div>
-        <div>
-          <div className="subsection-title">Destination Addresses</div>
-          <AddressList addresses={destinations} />
+    <div className="card">
+      <div className="card-header">
+        <span className="card-title">
+          <span className="card-title-icon">🌐</span>
+          Network Endpoints
+        </span>
+        <span className="card-badge secure">{ipsec.ip_version ?? "—"}</span>
+      </div>
+      <div className="card-body">
+        <div className="address-grid">
+          <div>
+            <div className="address-group-label">Source Addresses</div>
+            {sources.map((addr, i) => (
+              <span className="address-tag" key={i}>{addr}</span>
+            ))}
+          </div>
+          <div>
+            <div className="address-group-label">Destination Addresses</div>
+            {destinations.map((addr, i) => (
+              <span className="address-tag" key={i}>{addr}</span>
+            ))}
+          </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function AddressList({ addresses }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {addresses.map((address) => (
-        <span className="mono" key={address} style={{ fontSize: "0.85rem", color: "var(--text-primary)" }}>
-          {address}
-        </span>
-      ))}
     </div>
   );
 }

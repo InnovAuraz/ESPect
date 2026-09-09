@@ -1,0 +1,19 @@
+# ESPect Backend — Dependencies
+
+# Web framework
+fastapi>=0.115.0
+uvicorn>=0.34.0
+python-multipart>=0.0.18
+
+# Packet analysis
+scapy>=2.6.0
+
+# Machine learning
+scikit-learn>=1.6.0
+joblib>=1.4.0
+
+# PDF report generation
+reportlab>=4.3.0
+
+# Testing
+pytest>=8.0.0
