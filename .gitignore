@@ -259,3 +259,5 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+ipsec_analyzer/backend/esp_report.pdf
+testbed/sih-ipsec-analyzer_vm1/config/configuration.yaml

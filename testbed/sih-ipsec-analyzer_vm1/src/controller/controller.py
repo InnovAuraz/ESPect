@@ -1,6 +1,8 @@
 import json
 import socket
+import base64
 from threading import Thread
+from pathlib import Path
 
 from src.agent.ipsec import build
 
@@ -270,6 +272,45 @@ class Controller:
                 str(exc)
             ) from exc
 
+    def start_capture(
+        self,
+        interface: str,
+        filename: str,
+        capture_filter: str | None = None,
+    ) -> None:
+        send(
+            self.agent_a,
+            "start_capture",
+            interface=interface,
+            filename=filename,
+            capture_filter=capture_filter,
+        )
+
+    def stop_capture(self) -> None:
+        send(self.agent_a, "stop_capture")
+
+    def download_capture(self, output: str | Path) -> None:
+        output = Path(output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+
+        offset = 0
+        chunk_size = 32 * 1024
+
+        with output.open("wb") as file:
+            while True:
+                response = send(
+                    self.agent_a,
+                    "read_capture_chunk",
+                    offset=offset,
+                    size=chunk_size,
+                )
+                data = base64.b64decode(response["data"])
+                file.write(data)
+                offset += len(data)
+
+                if response["eof"]:
+                    break
+
 
 def send(
     host: str,
@@ -282,17 +323,20 @@ def send(
     }
 
     try:
-        with socket.create_connection(
-            (host, 9000),
-            timeout=10,
-        ) as connection:
-            connection.sendall(
-                json.dumps(request).encode()
-            )
+            with socket.create_connection(
+                (host, 9000),
+                timeout=10,
+            ) as connection:
+                connection.sendall(
+                    json.dumps(request).encode()
+                )
 
-            response = json.loads(
-                connection.recv(65536).decode()
-            )
+                response_data = bytearray()
+
+                while chunk := connection.recv(65536):
+                    response_data.extend(chunk)
+
+                response = json.loads(response_data.decode())
 
     except OSError as exc:
         raise ControllerError(

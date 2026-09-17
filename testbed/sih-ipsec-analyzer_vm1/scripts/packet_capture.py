@@ -4,7 +4,6 @@ from pathlib import Path
 
 import yaml
 
-from src.capture import Capture
 from src.capture.validator import validate as validate_pcap
 from src.controller import Controller
 from src.experiment.validator import validate as validate_configuration
@@ -16,7 +15,7 @@ VM2 = "192.168.160.129"
 IPV6_VM1 = "fd00:160::128"
 IPV6_VM2 = "fd00:160::129"
 
-CAPTURE_INTERFACE = "ens34"
+CAPTURE_INTERFACE = "eth1"
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = ROOT / "captures"
@@ -123,12 +122,6 @@ def run_capture(
         VM2,
     )
 
-    packet_capture = Capture(
-        interface=CAPTURE_INTERFACE,
-        output=output,
-        capture_filter=capture_filter,
-    )
-
     capture_started = False
     ipsec_started = False
 
@@ -149,7 +142,11 @@ def run_capture(
         # Capture MUST begin before IKE negotiation.
         print("[3/6] Starting tcpdump capture...")
 
-        packet_capture.start()
+        controller.start_capture(
+            interface=CAPTURE_INTERFACE,
+            filename=output.name,
+            capture_filter=capture_filter,
+        )
         capture_started = True
 
         print("[4/6] Initiating IPsec...")
@@ -202,11 +199,13 @@ def run_capture(
                 min(0.25, remaining)
             )
 
+        controller.wait_for_traffic()
+
     finally:
         print("[6/6] Stopping capture...")
 
         if capture_started:
-            packet_capture.stop()
+            controller.stop_capture()
 
         if ipsec_started:
             print("Terminating IPsec...")
@@ -218,6 +217,9 @@ def run_capture(
                     "Warning: failed to terminate IPsec: "
                     f"{exc}"
                 )
+
+        if capture_started:
+            controller.download_capture(output)
 
     print()
     print("Validating PCAP...")
