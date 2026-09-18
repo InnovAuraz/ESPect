@@ -19,6 +19,12 @@ export default function SecurityFindings({ findings }) {
                   <span className={`severity-tag ${f.severity.toLowerCase()}`}>{f.severity}</span>
                 </div>
                 <div className="finding-desc">{f.description}</div>
+                <div className="finding-meta">
+                  Source: {f.source || "rule"} · Confidence: {Math.round((f.confidence ?? 1) * 100)}%
+                </div>
+                {f.evidence && (
+                  <div className="finding-evidence">Evidence: {f.evidence}</div>
+                )}
                 {f.recommendation && (
                   <div className="finding-rec">→ {f.recommendation}</div>
                 )}

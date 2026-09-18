@@ -24,6 +24,9 @@ class SecurityFinding:
     title: str
     description: str
     recommendation: str
+    source: str = "rule"
+    confidence: float = 1.0
+    evidence: str | None = None
 
 
 @dataclass(frozen=True)

@@ -49,6 +49,9 @@ class SecurityFindingResponse(BaseModel):
     title: str
     description: str
     recommendation: str
+    source: str = "rule"
+    confidence: float = Field(ge=0.0, le=1.0, default=1.0)
+    evidence: str | None = None
 
 
 class SecurityResponse(BaseModel):

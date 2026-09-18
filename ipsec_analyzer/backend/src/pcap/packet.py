@@ -12,3 +12,5 @@ class Packet:
     source_port: int | None
     destination_port: int | None
     raw: Any
+    esp_spi: int | None = None
+    esp_sequence: int | None = None

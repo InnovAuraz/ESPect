@@ -3,7 +3,7 @@
 // only calls the functions exported from here.
 
 export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
 class ApiError extends Error {
   constructor(message, { status = null, isNetworkError = false } = {}) {
@@ -97,6 +97,66 @@ export async function generateReport(file) {
   const disposition = response.headers.get("Content-Disposition") || "";
   const match = disposition.match(/filename="?([^"]+)"?/);
   const filename = match ? match[1] : "ESPect_Report.pdf";
+
+  return { blob, filename };
+}
+
+export async function fetchCaptureSession() {
+  const response = await request("/api/capture/session", { method: "GET" });
+
+  if (!response.ok) {
+    const detail = await readErrorDetail(response, "Capture session status failed.");
+    throw new ApiError(detail, { status: response.status });
+  }
+
+  return response.json();
+}
+
+export async function startCaptureSession() {
+  const response = await request("/api/capture/start", { method: "POST" });
+
+  if (!response.ok) {
+    const detail = await readErrorDetail(response, "Failed to start capture session.");
+    throw new ApiError(detail, { status: response.status });
+  }
+
+  return response.json();
+}
+
+export async function runCaptureWorkflowStep(stepId) {
+  const response = await request(`/api/capture/workflow/${encodeURIComponent(stepId)}`, { method: "POST" });
+
+  if (!response.ok) {
+    const detail = await readErrorDetail(response, "Workflow step failed.");
+    throw new ApiError(detail, { status: response.status });
+  }
+
+  return response.json();
+}
+
+export async function stopCaptureSession() {
+  const response = await request("/api/capture/stop", { method: "POST" });
+
+  if (!response.ok) {
+    const detail = await readErrorDetail(response, "Failed to stop capture session.");
+    throw new ApiError(detail, { status: response.status });
+  }
+
+  return response.json();
+}
+
+export async function downloadCaptureSession() {
+  const response = await request("/api/capture/download", { method: "GET" });
+
+  if (!response.ok) {
+    const detail = await readErrorDetail(response, "Capture download failed.");
+    throw new ApiError(detail, { status: response.status });
+  }
+
+  const blob = await response.blob();
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  const filename = match ? match[1] : "capture_live_20260918.pcap";
 
   return { blob, filename };
 }

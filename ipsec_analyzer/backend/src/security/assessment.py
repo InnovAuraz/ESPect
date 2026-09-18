@@ -65,6 +65,8 @@ class SecurityAssessor:
                         "Use tunnel mode when full IP packet "
                         "encapsulation is required."
                     ),
+                    source="parsed_metadata",
+                    evidence="ESP packet structure indicates transport mode.",
                 )
             )
 
@@ -83,6 +85,9 @@ class SecurityAssessor:
                         "algorithm and ensure that negotiation "
                         "traffic is available for analysis."
                     ),
+                    source="not_observed",
+                    confidence=0.0,
+                    evidence="No readable IKE encryption transform was present.",
                 )
             )
             deductions += 5
@@ -100,6 +105,9 @@ class SecurityAssessor:
                         "Verify the configured IKE integrity "
                         "algorithm."
                     ),
+                    source="not_observed",
+                    confidence=0.0,
+                    evidence="No readable IKE integrity transform was present.",
                 )
             )
             deductions += 5
@@ -117,6 +125,9 @@ class SecurityAssessor:
                         "Verify the configured Diffie-Hellman "
                         "group."
                     ),
+                    source="not_observed",
+                    confidence=0.0,
+                    evidence="No readable IKE DH transform was present.",
                 )
             )
             deductions += 5
@@ -134,6 +145,9 @@ class SecurityAssessor:
                         "Verify the configured ESP encryption "
                         "algorithm."
                     ),
+                    source="not_observed",
+                    confidence=0.0,
+                    evidence="Child-SA parameters were not visible in the capture.",
                 )
             )
             deductions += 5
@@ -151,6 +165,9 @@ class SecurityAssessor:
                         "Verify the configured ESP integrity "
                         "algorithm."
                     ),
+                    source="not_observed",
+                    confidence=0.0,
+                    evidence="Child-SA parameters were not visible in the capture.",
                 )
             )
             deductions += 5

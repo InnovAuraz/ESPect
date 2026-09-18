@@ -21,8 +21,16 @@ from .schemas import (
 class ApplicationAnalyzer:
     def __init__(
         self,
-        model_path: str | Path = "training/model/traffic_classifier.joblib",
+        model_path: str | Path | None = None,
     ):
+        if model_path is None:
+            model_path = (
+                Path(__file__).resolve().parents[1]
+                / "training"
+                / "model"
+                / "traffic_classifier.joblib"
+            )
+
         self.model = TrafficClassifier()
         self.model.load(model_path)
 
@@ -92,6 +100,9 @@ class ApplicationAnalyzer:
                         title=finding.title,
                         description=finding.description,
                         recommendation=finding.recommendation,
+                        source=finding.source,
+                        confidence=finding.confidence,
+                        evidence=finding.evidence,
                     )
                     for finding in security_result.findings
                 ],
