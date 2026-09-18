@@ -4,6 +4,7 @@ from scapy.all import (
     ESP,
     Ether,
     IP,
+    Raw,
     UDP,
     wrpcap,
 )
@@ -228,3 +229,19 @@ def test_esp_configuration_is_unknown_when_not_visible(
     assert result.esp_encryption is None
     assert result.esp_integrity is None
     assert result.esp_pfs is None
+
+
+def test_detects_reverse_direction_ike(tmp_path: Path):
+    path = tmp_path / "reverse-ike.pcap"
+    packet = (
+        Ether()
+        / IP(src="192.168.1.20", dst="192.168.1.10")
+        / UDP(sport=500, dport=40000)
+        / Raw(b"IKE")
+    )
+    wrpcap(str(path), [packet])
+
+    packets = list(PcapReader(path))
+    result = analyze(packets)
+
+    assert result.ike_detected is True

@@ -61,7 +61,10 @@ def analyze(packets: Iterable[Packet]) -> IPsecAnalysis:
 
         if (
             packet.protocol == "UDP"
-            and packet.destination_port in {500, 4500}
+            and (
+                packet.source_port in {500, 4500}
+                or packet.destination_port in {500, 4500}
+            )
         ):
             ike_packets.append(packet)
 
@@ -528,6 +531,9 @@ def _key_bits(value) -> int | None:
 
 
 def _esp_fields(packet: Packet) -> tuple[int | None, int | None]:
+    if packet.esp_spi is not None or packet.esp_sequence is not None:
+        return packet.esp_spi, packet.esp_sequence
+
     raw = packet.raw
 
     if not raw.haslayer("ESP"):

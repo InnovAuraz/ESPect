@@ -66,8 +66,6 @@ class Capture:
         self._log_file = self.error_log.open("wb")
 
         command = [
-            "sudo",
-            "-n",
             "tcpdump",
             "-i",
             self.interface,
@@ -76,6 +74,13 @@ class Capture:
             "-w",
             str(self.output),
         ]
+
+        # Capture runs on a Linux VM in the automated workflow,
+        # where tcpdump needs elevated privileges.  Do not invoke
+        # sudo on Windows: the orchestration process runs there and
+        # Windows does not provide the Linux tcpdump interface.
+        if os.name != "nt":
+            command[:0] = ["sudo", "-n"]
 
         if self.capture_filter:
             command.append(self.capture_filter)

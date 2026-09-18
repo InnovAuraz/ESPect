@@ -1,7 +1,8 @@
 from pathlib import Path
 
 import pytest
-from scapy.all import Ether, IP, TCP, UDP, wrpcap
+from scapy.all import Ether, IP, Raw, TCP, UDP, wrpcap
+from scapy.contrib.ikev2 import IKEv2
 
 from src.pcap import Packet, PcapReader
 
@@ -71,3 +72,51 @@ def test_reader_is_iterable(pcap_file: Path):
     first = next(iter(reader))
 
     assert isinstance(first, Packet)
+
+
+def test_reader_extracts_nat_t_esp(pcap_file: Path):
+    packet = (
+        Ether()
+        / IP(src="192.168.1.10", dst="192.168.1.20")
+        / UDP(sport=4500, dport=4500)
+        / Raw(
+            b"\x12\x34\x56\x78"
+            b"\x00\x00\x00\x07"
+            b"encrypted"
+        )
+    )
+    wrpcap(str(pcap_file), [packet])
+
+    result = list(PcapReader(pcap_file))[0]
+
+    assert result.protocol == "ESP"
+    assert result.esp_spi == 0x12345678
+    assert result.esp_sequence == 7
+
+
+def test_reader_keeps_ike_over_nat_t_as_udp(pcap_file: Path):
+    packet = (
+        Ether()
+        / IP(src="192.168.1.10", dst="192.168.1.20")
+        / UDP(sport=4500, dport=4500)
+        / Raw(b"\x00\x00\x00\x00ike")
+    )
+    wrpcap(str(pcap_file), [packet])
+
+    result = list(PcapReader(pcap_file))[0]
+
+    assert result.protocol == "UDP"
+
+
+def test_reader_preserves_ikev2_layer(pcap_file: Path):
+    packet = (
+        Ether()
+        / IP(src="192.168.1.10", dst="192.168.1.20")
+        / UDP(sport=500, dport=500)
+        / IKEv2(exch_type=34)
+    )
+    wrpcap(str(pcap_file), [packet])
+
+    result = list(PcapReader(pcap_file))[0]
+
+    assert result.raw.haslayer("IKEv2")

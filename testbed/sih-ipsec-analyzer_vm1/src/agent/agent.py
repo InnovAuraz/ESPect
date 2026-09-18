@@ -1,8 +1,11 @@
 import json
 import socket
 import subprocess
+import base64
+from pathlib import Path
 
 from .ipsec import apply, initiate, status, terminate
+from src.capture import Capture
 from src.traffic import command
 
 
@@ -15,6 +18,8 @@ class Agent:
         self.host = host
         self.configuration = None
         self.process = None
+        self.capture = None
+        self.capture_file = None
 
     def configure(self, configuration: dict) -> None:
         self.configuration = configuration
@@ -74,6 +79,58 @@ class Agent:
             raise AgentError(
                 f"Traffic failed with exit code {result}"
             )
+
+    def start_capture(
+        self,
+        interface: str,
+        filename: str,
+        capture_filter: str | None = None,
+    ) -> None:
+        if self.capture is not None:
+            raise AgentError("Capture is already running")
+
+        safe_name = Path(filename).name
+
+        if safe_name != filename:
+            raise AgentError("Capture filename must not contain a path")
+
+        self.capture_file = Path("captures") / safe_name
+        self.capture = Capture(
+            interface=interface,
+            output=self.capture_file,
+            capture_filter=capture_filter,
+        )
+        self.capture.start()
+
+    def stop_capture(self) -> None:
+        if self.capture is None:
+            raise AgentError("Capture is not running")
+
+        self.capture.stop()
+        self.capture = None
+
+    def read_capture_chunk(
+        self,
+        offset: int,
+        size: int,
+    ) -> dict:
+        if self.capture is not None:
+            raise AgentError("Capture must be stopped before download")
+
+        if self.capture_file is None:
+            raise AgentError("No capture is available")
+
+        try:
+            with self.capture_file.open("rb") as file:
+                file.seek(offset)
+                data = file.read(size)
+        except OSError as exc:
+            raise AgentError("Failed to read capture") from exc
+
+        return {
+            "data": base64.b64encode(data).decode("ascii"),
+            "eof": len(data) < size,
+        }
 
 
 _agent = Agent()
@@ -163,6 +220,25 @@ def _handle(request: dict) -> dict:
 
         elif action == "wait":
             _agent.wait()
+
+        elif action == "start_capture":
+            _agent.start_capture(
+                request["interface"],
+                request["filename"],
+                request.get("capture_filter"),
+            )
+
+        elif action == "stop_capture":
+            _agent.stop_capture()
+
+        elif action == "read_capture_chunk":
+            return {
+                "ok": True,
+                **_agent.read_capture_chunk(
+                    request["offset"],
+                    request["size"],
+                ),
+            }
 
         else:
             raise AgentError(

@@ -1,8 +1,8 @@
 from src.ml import Dataset
 
 dataset = Dataset(
-    "testbed/sih-ipsec-analyzer_vm1/dataset",
-    "ipsec_analyzer/backend/training",
+    "../../testbed/sih-ipsec-analyzer_vm1/dataset",
+    "training",
 )
 
 dataset.build()

@@ -251,8 +251,11 @@ class Dataset:
                 writer.writerow(row)
 
     def _clear_output(self) -> None:
-        if self.output_path.exists():
-            shutil.rmtree(self.output_path)
+        for split_name in ("train", "test"):
+            split_path = self.output_path / split_name
+
+            if split_path.exists():
+                shutil.rmtree(split_path)
 
     def _load_split(
         self,
