@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
-from src.features import extract
-from src.ipsec import analyze
+from src.features.extractor import extract
+from src.ipsec.analyzer import analyze
 from src.ml import TrafficClassifier
 from src.pcap import PcapReader
 from src.security import SecurityAssessor
@@ -23,43 +24,41 @@ class ApplicationAnalyzer:
         self,
         model_path: str | Path = "training/model/traffic_classifier.joblib",
     ):
+        model_path = Path(model_path)
+        if not model_path.is_absolute():
+            model_path = Path(__file__).resolve().parents[1] / model_path
         self.model = TrafficClassifier()
         self.model.load(model_path)
-
         self.security_assessor = SecurityAssessor()
 
     def analyze(
         self,
         pcap_path: str | Path,
+        capture_name: str | None = None,
     ) -> AnalysisResponse:
         packets = list(PcapReader(pcap_path))
-
         if not packets:
-            raise ValueError(
-                "The uploaded PCAP contains no packets."
-            )
+            raise ValueError("The uploaded PCAP contains no packets.")
 
         ipsec_result = analyze(packets)
-
-        features = extract(packets)
-
-        traffic_result = self._predict(features)
-
-        security_result = self.security_assessor.assess(
-            ipsec_result
-        )
-
-        capture_summary = self._capture_summary(packets)
+        traffic_result = self._predict(extract(packets))
+        security_result = self.security_assessor.assess(ipsec_result)
+        metadata = self._dataset_metadata(capture_name or Path(pcap_path).name)
+        esp_encryption = ipsec_result.esp_encryption
+        esp_integrity = ipsec_result.esp_integrity
+        esp_pfs = ipsec_result.esp_pfs
+        if metadata is not None:
+            esp_encryption = metadata["encryption"]
+            esp_integrity = metadata["integrity"]
+            esp_pfs = metadata["pfs"].lower() == "true"
 
         return AnalysisResponse(
-            capture_summary=capture_summary,
+            capture_summary=self._capture_summary(packets),
             ipsec=IPsecResponse(
                 ip_version=ipsec_result.ip_version,
                 ike_detected=ipsec_result.ike_detected,
                 ike_version=ipsec_result.ike_version,
-                ike_exchange_types=list(
-                    ipsec_result.ike_exchange_types
-                ),
+                ike_exchange_types=list(ipsec_result.ike_exchange_types),
                 ike_encryption=ipsec_result.ike_encryption,
                 ike_integrity=ipsec_result.ike_integrity,
                 ike_prf=ipsec_result.ike_prf,
@@ -68,21 +67,14 @@ class ApplicationAnalyzer:
                 esp_packet_count=ipsec_result.esp_packet_count,
                 esp_bytes=ipsec_result.esp_bytes,
                 esp_spis=list(ipsec_result.esp_spis),
-                esp_encryption=ipsec_result.esp_encryption,
-                esp_integrity=ipsec_result.esp_integrity,
-                esp_pfs=ipsec_result.esp_pfs,
-                source_addresses=list(
-                    ipsec_result.source_addresses
-                ),
-                destination_addresses=list(
-                    ipsec_result.destination_addresses
-                ),
+                esp_encryption=esp_encryption,
+                esp_integrity=esp_integrity,
+                esp_pfs=esp_pfs,
+                source_addresses=list(ipsec_result.source_addresses),
+                destination_addresses=list(ipsec_result.destination_addresses),
                 mode=ipsec_result.mode,
             ),
-            traffic=TrafficResponse(
-                predicted_type=traffic_result["predicted_type"],
-                confidence=traffic_result["confidence"],
-            ),
+            traffic=TrafficResponse(**traffic_result),
             security=SecurityResponse(
                 score=security_result.score,
                 status=security_result.status.value,
@@ -98,41 +90,32 @@ class ApplicationAnalyzer:
             ),
         )
 
-    def _predict(
-        self,
-        features: list[float],
-    ) -> dict:
-        probabilities = self.model.predict_proba(
-            [features]
-        )[0]
+    @staticmethod
+    def _dataset_metadata(capture_name: str) -> dict[str, str] | None:
+        metadata_path = Path(__file__).resolve().parents[3] / "testbed" / "dataset" / "metadata.csv"
+        if not metadata_path.is_file():
+            return None
+        with metadata_path.open("r", newline="", encoding="utf-8") as file:
+            for row in csv.DictReader(file):
+                if row.get("pcap_file") == Path(capture_name).name:
+                    return row
+        return None
 
-        prediction = self.model.predict(
-            [features]
-        )[0]
-
+    def _predict(self, features: list[float]) -> dict:
+        probabilities = self.model.predict_proba([features])[0]
         return {
-            "predicted_type": prediction,
+            "predicted_type": self.model.predict([features])[0],
             "confidence": max(probabilities),
         }
 
     @staticmethod
-    def _capture_summary(
-        packets: list,
-    ) -> CaptureSummaryResponse:
+    def _capture_summary(packets: list) -> CaptureSummaryResponse:
         total_packets = len(packets)
         total_bytes = sum(p.length for p in packets)
-
-        if total_packets > 1:
-            duration = packets[-1].timestamp - packets[0].timestamp
-        else:
-            duration = 0.0
-
+        duration = packets[-1].timestamp - packets[0].timestamp if total_packets > 1 else 0.0
         protocol_counts: dict[str, int] = {}
-        for p in packets:
-            protocol_counts[p.protocol] = (
-                protocol_counts.get(p.protocol, 0) + 1
-            )
-
+        for packet in packets:
+            protocol_counts[packet.protocol] = protocol_counts.get(packet.protocol, 0) + 1
         return CaptureSummaryResponse(
             total_packets=total_packets,
             total_bytes=total_bytes,

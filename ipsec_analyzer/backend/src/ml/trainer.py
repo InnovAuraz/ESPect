@@ -10,7 +10,7 @@ class Trainer:
     def __init__(
         self,
         dataset: Dataset,
-        model_path: str | Path = "training/model/traffic_classifier.joblib",
+        model_path: str | Path = "../training/model/traffic_classifier.joblib",
     ):
         self.dataset = dataset
         self.model_path = Path(model_path)

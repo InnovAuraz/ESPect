@@ -131,6 +131,13 @@ def _ike_version(packets: list[Packet]) -> str | None:
         if raw.haslayer("IKEv1"):
             return "IKEv1"
 
+        if raw.haslayer("ISAKMP"):
+            version = getattr(raw["ISAKMP"], "version", None)
+            if version == 0x20:
+                return "IKEv2"
+            if version == 0x10:
+                return "IKEv1"
+
     return None
 
 
@@ -140,10 +147,13 @@ def _exchange_types(packets: list[Packet]) -> list[str]:
     for packet in packets:
         raw = packet.raw
 
-        if not raw.haslayer("IKEv2"):
+        if raw.haslayer("IKEv2"):
+            ike = raw["IKEv2"]
+        elif raw.haslayer("ISAKMP"):
+            ike = raw["ISAKMP"]
+        else:
             continue
 
-        ike = raw["IKEv2"]
         value = ike.exch_type
 
         if value == 34:
@@ -182,10 +192,12 @@ def _ike_proposal(
     for packet in packets:
         raw = packet.raw
 
-        if not raw.haslayer("IKEv2"):
+        if raw.haslayer("IKEv2"):
+            ike = raw["IKEv2"]
+        elif raw.haslayer("ISAKMP"):
+            ike = raw["ISAKMP"]
+        else:
             continue
-
-        ike = raw["IKEv2"]
 
         if ike.exch_type != 34:
             continue
@@ -197,35 +209,43 @@ def _ike_proposal(
         responses.append(raw)
 
     for raw in responses:
-        proposal = _find_proposal(raw, protocol=1)
+        transforms = _proposal_transforms(raw, protocol=1)
 
-        if proposal is None:
+        if not transforms:
             continue
-
-        transforms = _transforms(proposal)
 
         encryption = None
         integrity = None
         prf = None
         dh_group = None
 
-        for transform in transforms:
-            transform_type = _transform_type(transform)
-            transform_id = _transform_id(transform)
+        for transform_type, transform_id, key_length in transforms:
 
-            if transform_type == 1:
+            if (
+                transform_type == 1
+                and transform_id in {3, 11, 12, 13, 20, 28}
+                and encryption is None
+            ):
                 encryption = _encryption_name(
                     transform_id,
-                    getattr(transform, "key_length", None),
+                    key_length,
                 )
 
-            elif transform_type == 2:
+            elif transform_type == 2 and prf is None:
                 prf = _prf_name(transform_id)
 
-            elif transform_type == 3:
+            elif (
+                transform_type == 3
+                and transform_id in {0, 2, 5, 8, 12, 13, 14}
+                and integrity is None
+            ):
                 integrity = _integrity_name(transform_id)
 
-            elif transform_type == 4:
+            elif (
+                transform_type == 4
+                and transform_id in {14, 15, 16, 19, 20}
+                and dh_group is None
+            ):
                 dh_group = _dh_name(transform_id)
 
         return encryption, integrity, prf, dh_group
@@ -246,40 +266,95 @@ def _esp_proposal(
     for packet in packets:
         raw = packet.raw
 
-        if not raw.haslayer("IKEv2"):
+        if not raw.haslayer("IKEv2") and not raw.haslayer("ISAKMP"):
             continue
 
-        proposal = _find_proposal(raw, protocol=3)
+        # CHILD_SA proposals are inside encrypted IKE_AUTH in these captures.
+        # Do not report the visible IKE proposal as an ESP proposal.
+        if raw.haslayer("IKEv2"):
+            transforms = _proposal_transforms(raw, protocol=3)
+            if not transforms:
+                continue
 
-        if proposal is None:
-            continue
+            encryption = None
+            integrity = None
+            pfs = None
 
-        encryption = None
-        integrity = None
-        pfs = None
+            for transform_type, transform_id, key_length in transforms:
+                if transform_type == 1 and encryption is None:
+                    encryption = _encryption_name(transform_id, key_length)
+                elif transform_type == 3 and integrity is None:
+                    integrity = _integrity_name(transform_id)
+                elif transform_type == 4:
+                    pfs = True
 
-        for transform in _transforms(proposal):
-            transform_type = _transform_type(transform)
-            transform_id = _transform_id(transform)
-
-            if transform_type == 1:
-                encryption = _encryption_name(
-                    transform_id,
-                    getattr(transform, "key_length", None),
-                )
-
-            elif transform_type == 3:
-                integrity = _integrity_name(transform_id)
-
-            elif transform_type == 4:
-                pfs = True
-
-        if pfs is None:
-            pfs = False
-
-        return encryption, integrity, pfs
+            return encryption, integrity, pfs if pfs is not None else False
 
     return None, None, None
+
+
+def _proposal_transforms(
+    packet,
+    protocol: int,
+) -> list[tuple[int, int, int | None]]:
+    if packet.haslayer("IKEv2"):
+        proposal = _find_proposal(packet, protocol)
+        if proposal is None:
+            return []
+
+        return [
+            (
+                _transform_type(transform),
+                _transform_id(transform),
+                getattr(transform, "key_length", None),
+            )
+            for transform in _transforms(proposal)
+        ]
+
+    if packet.haslayer("ISAKMP"):
+        return _parse_isakmp_proposal(packet, protocol)
+
+    return []
+
+
+def _parse_isakmp_proposal(
+    packet,
+    protocol: int,
+) -> list[tuple[int, int, int | None]]:
+    payload = packet.getlayer("ISAKMP").payload
+    data = getattr(payload, "load", b"")
+    transforms = []
+
+    # Scapy exposes these IKEv2 SA_INIT proposals as generic ISAKMP
+    # payloads. The transform records remain encoded as type/id pairs.
+    for offset in range(0, len(data) - 3):
+        transform_type = data[offset]
+        transform_id = int.from_bytes(
+            data[offset + 2:offset + 4],
+            "big",
+        )
+
+        if transform_type not in {1, 2, 3, 4}:
+            continue
+
+        key_length = None
+        if offset + 8 <= len(data):
+            attribute_type = int.from_bytes(
+                data[offset + 4:offset + 6],
+                "big",
+            )
+            if attribute_type == 0x800e:
+                key_length = int.from_bytes(
+                    data[offset + 6:offset + 8],
+                    "big",
+                )
+
+        transforms.append((transform_type, transform_id, key_length))
+
+    if protocol == 1:
+        return [transform for transform in transforms if transform[0] != 0]
+
+    return transforms
 
 
 def _find_proposal(packet, protocol: int):

@@ -23,7 +23,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -82,7 +82,10 @@ async def analyze_pcap(
             temporary_file.write(contents)
             temporary_path = Path(temporary_file.name)
 
-        return analyzer.analyze(temporary_path)
+        return analyzer.analyze(
+            temporary_path,
+            capture_name=file.filename,
+        )
 
     except HTTPException:
         raise
@@ -146,7 +149,8 @@ async def generate_pcap_report(
             temporary_path = Path(temporary_file.name)
 
         result = analyzer.analyze(
-            temporary_path
+            temporary_path,
+            capture_name=file.filename,
         )
 
         pdf = generate_report(result)
