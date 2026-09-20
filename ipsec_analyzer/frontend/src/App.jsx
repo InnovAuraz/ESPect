@@ -9,10 +9,11 @@ import {
   startCaptureSession,
   stopCaptureSession,
   downloadCaptureSession,
-  runCaptureWorkflowStep,
-  analyzeLiveCapture, // NEW: Import the live capture analysis route
+  analyzeLiveCapture,
 } from "./services/api";
 
+import ThreatMatrixView from "./components/ThreatMatrixView";
+import ProtocolScanView from "./components/ProtocolScanView";
 import Header from "./components/Header";
 import PcapUploader from "./components/PcapUploader";
 import AnalysisLoading from "./components/AnalysisLoading";
@@ -28,363 +29,15 @@ import SecurityFindings from "./components/SecurityFindings";
 import ReportButton from "./components/ReportButton";
 import EmptyState from "./components/EmptyState";
 
+// NEW: Import the extracted LiveCaptureView component
+import LiveCaptureView from "./components/LiveCaptureView";
+
 const navItems = [
   { id: "overview", label: "Overview", icon: "◈" },
   { id: "protocol-scan", label: "Protocol scan", icon: "▣" },
   { id: "live-capture", label: "Live capture", icon: "⇄" },
   { id: "risk-findings", label: "Risk findings", icon: "⚑" },
 ];
-
-function createDefaultWorkflowSteps() {
-  return [
-    { id: "vm1_ready", title: "VM1 ready", endpoint: "VM1 controller", command: "ip addr && ping -c 1 192.168.160.129", detail: "Check VM1 network state and reachability.", status: "idle", output: "Awaiting validation." },
-    { id: "vm2_ready", title: "VM2 ready", endpoint: "VM2 peer", command: "ip addr && ping -c 1 192.168.160.128", detail: "Check VM2 network state and reachability.", status: "idle", output: "Awaiting validation." },
-    { id: "config_loaded", title: "Config loaded", endpoint: "Experiment config", command: "python scripts/packet_capture.py config/configuration.yaml 30", detail: "Load and validate the IPsec experiment configuration.", status: "idle", output: "Awaiting config." },
-    { id: "ipsec_applied", title: "IPsec applied", endpoint: "StrongSwan", command: "ipsec statusall", detail: "Apply the IPsec SA and confirm the tunnel is active.", status: "idle", output: "Awaiting tunnel status." },
-    { id: "capture_started", title: "Capture started", endpoint: "tcpdump", command: "tcpdump -i eth1 -w captures/live_capture.pcap", detail: "Start packet capture before traffic or IKE negotiation begins.", status: "idle", output: "Awaiting capture start." },
-    { id: "traffic_generated", title: "Traffic generated", endpoint: "Traffic generator", command: "python scripts/run_agent.py --mode traffic", detail: "Generate encrypted traffic across the active IPsec tunnel.", status: "idle", output: "Awaiting traffic." },
-    { id: "capture_stopped", title: "Capture stopped", endpoint: "Controller", command: "pkill -f tcpdump", detail: "Stop packet collection after the capture window is complete.", status: "idle", output: "Awaiting stop." },
-    { id: "pcap_validated", title: "PCAP validated", endpoint: "Validator", command: "python -m src.capture.validator", detail: "Validate the capture before analysis or download.", status: "idle", output: "Awaiting validation." },
-  ];
-}
-
-function createDefaultCaptureSession() {
-  return {
-    is_running: false,
-    session_name: "capture_live_20260918.pcap",
-    endpoints: [
-      {
-        id: "alpha",
-        title: "System A",
-        status: "Listening",
-        ip: "10.10.0.12",
-        iface: "eth0",
-        filter: "ipsec or esp",
-        duration: "00:00:00",
-        packets: "0",
-        bytes: "0 B",
-        mode: "Full trace",
-      },
-      {
-        id: "beta",
-        title: "System B",
-        status: "Listening",
-        ip: "10.10.0.22",
-        iface: "ens192",
-        filter: "udp port 500 or 4500",
-        duration: "00:00:00",
-        packets: "0",
-        bytes: "0 B",
-        mode: "Filtered",
-      },
-    ],
-    telemetry: {
-      packets_per_sec: "0",
-      bytes_per_sec: "0 B",
-      esp_flows: "0",
-      alerts: "0",
-    },
-    log: [
-      "Capture workflow ready. Start the VMs to continue.",
-      "VM1 and VM2 must be running before the IPsec tunnel can be established.",
-    ],
-    workflow: {
-      steps: createDefaultWorkflowSteps(),
-    },
-    file: {
-      name: "capture_live_20260918.pcap",
-      size: "0 MB",
-      packets: "0",
-    },
-  };
-}
-
-function LiveCaptureView({
-  session,
-  captureError, // NEW: Receive error state
-  isMutating,
-  onStartCapture,
-  onStopCapture,
-  onDownload,
-  onRunWorkflowStep,
-}) {
-  const [tick, setTick] = useState(0);
-  
-  // NEW: State for execution parameters
-  const [mode, setMode] = useState("random");
-  const [trafficType, setTrafficType] = useState("voip");
-  const [duration, setDuration] = useState(30);
-
-  useEffect(() => {
-    if (!session || !session.is_running) return undefined;
-    const intervalId = window.setInterval(() => {
-      setTick((value) => value + 1);
-    }, 1200);
-    return () => window.clearInterval(intervalId);
-  }, [session]);
-
-  const activeSession = session || createDefaultCaptureSession();
-
-  const endpoints = activeSession.endpoints || [];
-  const telemetry = activeSession.telemetry || {};
-  const logEntries = activeSession.log || [];
-  const fileMeta = activeSession.file || {};
-  const workflowSteps = activeSession.workflow?.steps || createDefaultWorkflowSteps();
-
-  const packetsPerSec = Number(String(telemetry.packets_per_sec || "0").replace(/[,\sMB]/g, "")) || 0;
-  const currentPackets = Math.max(3600, packetsPerSec + (tick % 8) * 140);
-  const currentBytes = `${(1.2 + (tick % 7) * 0.18).toFixed(2)} MB`;
-  const currentFlows = Number(telemetry.esp_flows || 0) + (tick % 5);
-  const currentAlerts = Number(telemetry.alerts || 0) + (tick % 3 === 0 ? 1 : 0);
-  const chartLevels = [
-    28 + (tick % 4) * 6, 36 + (tick % 5) * 7, 42 + (tick % 6) * 7,
-    58 + (tick % 4) * 8, 72 + (tick % 5) * 7, 68 + (tick % 6) * 8,
-    88 + (tick % 4) * 6, 100, 84 + (tick % 5) * 7,
-    72 + (tick % 4) * 6, 56 + (tick % 5) * 7, 42 + (tick % 4) * 6,
-  ];
-
-  // NEW: Pass options up when starting capture
-  const handleStart = () => {
-    onStartCapture({ mode, traffic_type: trafficType, duration: Number(duration) });
-  };
-
-  return (
-    <div className="live-capture-view">
-      <ErrorBanner message={captureError} />
-      
-      <div className="capture-header">
-        <div>
-          <div className="eyebrow">LIVE / CAPTURE SESSION</div>
-          <h2>Dual-endpoint packet acquisition</h2>
-        </div>
-        <div className="capture-actions">
-          <button
-            type="button"
-            className="btn-capture"
-            onClick={activeSession.is_running ? onStopCapture : handleStart}
-            disabled={isMutating}
-          >
-            {activeSession.is_running ? "Stop capture" : "Start capture"}
-          </button>
-          <button type="button" className="btn-secondary" onClick={onDownload} disabled={isMutating}>
-            Download .pcap
-          </button>
-        </div>
-      </div>
-
-      {/* NEW: Execution Parameters Control Panel */}
-      <div className="capture-controls card" style={{ marginBottom: "2rem", padding: "1.5rem" }}>
-        <div className="card-header" style={{ marginBottom: "1rem" }}>
-          <div className="card-title">Execution Parameters</div>
-          <div className="card-badge secure">SIH DEMO CONTROLS</div>
-        </div>
-        <div style={{ display: "flex", gap: "2rem", alignItems: "center", flexWrap: "wrap" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-            <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600 }}>OPERATION MODE</label>
-            <select 
-              value={mode} 
-              onChange={(e) => setMode(e.target.value)}
-              disabled={activeSession.is_running}
-              style={{ padding: "0.5rem", background: "var(--surface-sunken)", border: "1px solid var(--border)", color: "var(--text-main)", borderRadius: "4px" }}
-            >
-              <option value="random">Randomized (Auto-select)</option>
-              <option value="targeted">Targeted (Testing Mode)</option>
-            </select>
-          </div>
-          
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", opacity: mode === "random" ? 0.4 : 1, pointerEvents: mode === "random" ? "none" : "auto" }}>
-            <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600 }}>TRAFFIC TYPE</label>
-            <select 
-              value={trafficType} 
-              onChange={(e) => setTrafficType(e.target.value)}
-              disabled={activeSession.is_running}
-              style={{ padding: "0.5rem", background: "var(--surface-sunken)", border: "1px solid var(--border)", color: "var(--text-main)", borderRadius: "4px" }}
-            >
-              <option value="voip">VoIP (UDP)</option>
-              <option value="video">Video Streaming</option>
-              <option value="web">Web (HTTP/S)</option>
-              <option value="whatsapp">WhatsApp</option>
-              <option value="email">Email (SMTP/IMAP)</option>
-              <option value="icmp">ICMP (Ping)</option>
-            </select>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-            <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600 }}>DURATION (SEC)</label>
-            <input 
-              type="number" 
-              value={duration} 
-              onChange={(e) => setDuration(e.target.value)}
-              disabled={activeSession.is_running}
-              min="5"
-              max="120"
-              style={{ width: "80px", padding: "0.5rem", background: "var(--surface-sunken)", border: "1px solid var(--border)", color: "var(--text-main)", borderRadius: "4px" }}
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className="capture-grid">
-        {endpoints.map((endpoint) => (
-          <div className="capture-card" key={endpoint.id}>
-            <div className="capture-card-header">
-              <div>
-                <div className="system-tag">{endpoint.title}</div>
-                <h3>{endpoint.title}</h3>
-              </div>
-              <span className={`status-pill ${endpoint.status === "Capturing" ? "capturing" : "idle"}`}>
-                {endpoint.status}
-              </span>
-            </div>
-
-            <div className="field-grid">
-              <div className="field-item">
-                <label>Interface</label>
-                <strong>{endpoint.iface}</strong>
-              </div>
-              <div className="field-item">
-                <label>Source IP</label>
-                <strong>{endpoint.ip}</strong>
-              </div>
-              <div className="field-item">
-                <label>Capture mode</label>
-                <strong>{endpoint.mode}</strong>
-              </div>
-              <div className="field-item">
-                <label>Duration</label>
-                <strong>{endpoint.duration}</strong>
-              </div>
-              <div className="field-item full">
-                <label>Filter</label>
-                <strong>{endpoint.filter}</strong>
-              </div>
-              <div className="field-item full">
-                <label>Packet target</label>
-                <strong>{endpoint.packets} packets / auto-save</strong>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="workflow-card">
-        <div className="card-header">
-          <div className="card-title">Capture workflow</div>
-          <div className="card-badge secure">EXECUTION ORDER</div>
-        </div>
-        <div className="workflow-steps">
-          {workflowSteps.map((step) => {
-            const isRunning = step.status === "running";
-            const isDone = step.status === "done";
-            const isFailed = step.status === "failed";
-
-            return (
-              <div key={step.id} className={`workflow-step ${step.status}`}>
-                <div className="workflow-step-main">
-                  <div className={`workflow-status ${step.status}`} aria-label={step.status}>
-                    {isRunning ? "●" : isDone ? "✓" : isFailed ? "!" : "○"}
-                  </div>
-                  <div className="workflow-copy">
-                    <div className="workflow-step-title-row">
-                      <span className="workflow-step-title">{step.title}</span>
-                      <span className="workflow-step-endpoint">{step.endpoint}</span>
-                    </div>
-                    <div className="workflow-step-command">{step.command || "Awaiting command"}</div>
-                    <div className="workflow-step-detail">{step.detail || "Awaiting description."}</div>
-                    <div className="workflow-step-output">{step.output || "Waiting for result..."}</div>
-                  </div>
-                </div>
-
-                <div className="workflow-step-actions">
-                  {isRunning ? (
-                    <span className="workflow-loading-inline"><span className="mini-spinner" /> Running</span>
-                  ) : (
-                    <button
-                      type="button"
-                      className="btn-secondary workflow-button"
-                      onClick={() => onRunWorkflowStep(step.id)}
-                      disabled={isMutating}
-                    >
-                      {isDone ? "Completed" : isFailed ? "Retry" : "Run step"}
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="capture-analytics card">
-        <div className="card-header">
-          <div className="card-title">Live traffic telemetry</div>
-          <div className="card-badge secure">{activeSession.is_running ? "ACTIVE" : "STANDBY"}</div>
-        </div>
-
-        <div className="metric-grid">
-          <div className="metric-box">
-            <span>Packets / sec</span>
-            <strong>{activeSession.is_running ? currentPackets.toLocaleString() : telemetry.packets_per_sec || "0"}</strong>
-          </div>
-          <div className="metric-box">
-            <span>Bytes / sec</span>
-            <strong>{activeSession.is_running ? currentBytes : telemetry.bytes_per_sec || "0 B"}</strong>
-          </div>
-          <div className="metric-box">
-            <span>ESP flows</span>
-            <strong>{activeSession.is_running ? currentFlows : telemetry.esp_flows || "0"}</strong>
-          </div>
-          <div className="metric-box">
-            <span>Alerts</span>
-            <strong>{String(activeSession.is_running ? currentAlerts : telemetry.alerts || 0).padStart(2, "0")}</strong>
-          </div>
-        </div>
-
-        <div className="chart-wrap" aria-label="Traffic chart">
-          <div className="chart-bars">
-            {chartLevels.map((level, index) => (
-              <span key={index} style={{ height: `${activeSession.is_running ? level : Math.max(level - 24, 18)}%` }} />
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="capture-bottom-row">
-        <div className="capture-log card">
-          <div className="card-header">
-            <div className="card-title">Session log</div>
-            <div className="card-badge warning">{activeSession.is_running ? "LIVE" : "IDLE"}</div>
-          </div>
-          <ul className="log-list">
-            {logEntries.map((entry, index) => (
-              <li key={`${entry}-${index}`}>{entry}</li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="capture-summary card">
-          <div className="card-header">
-            <div className="card-title">Acquired file</div>
-            <div className="card-badge secure">{activeSession.is_running ? "SAVING" : "SAVED"}</div>
-          </div>
-          <div className="summary-box">
-            <div className="summary-icon">▣</div>
-            <div>
-              <strong>{fileMeta.name || "capture_live_20260918.pcap"}</strong>
-              <span>{fileMeta.size || "1.8 MB"} • {fileMeta.packets || "20,412"} packets</span>
-            </div>
-          </div>
-          <div className="summary-actions">
-            <button type="button" className="btn-secondary" onClick={onDownload}>Export report</button>
-            <button type="button" className="btn-capture" onClick={activeSession.is_running ? onStopCapture : handleStart} disabled={isMutating}>
-              {activeSession.is_running ? "Stop session" : "Save session"}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function App() {
   const [backendStatus, setBackendStatus] = useState("checking");
@@ -398,11 +51,10 @@ function App() {
   const [activeView, setActiveView] = useState("overview");
   
   const [captureSession, setCaptureSession] = useState(null);
-  const [captureError, setCaptureError] = useState(null); // NEW: Track capture errors
+  const [captureError, setCaptureError] = useState(null);
   const [isLoadingCapture, setIsLoadingCapture] = useState(false);
   const [isMutatingCapture, setIsMutatingCapture] = useState(false);
 
-  // NEW: Refs to prevent infinite auto-analysis loops
   const autoAnalyzedCapture = useRef(false);
   const captureRunRequested = useRef(false);
 
@@ -413,7 +65,6 @@ function App() {
       const session = await fetchCaptureSession();
       setCaptureSession(session);
     } catch (error) {
-      setCaptureSession(createDefaultCaptureSession());
       window.console?.error?.(error);
     } finally {
       setIsLoadingCapture(false);
@@ -441,7 +92,6 @@ function App() {
     return () => { ignore = true; };
   }, []);
 
-  // NEW: Polling hook to automatically check capture status
   useEffect(() => {
     if (activeView !== "live-capture") return undefined;
     const initialRefresh = window.setTimeout(() => {
@@ -456,7 +106,6 @@ function App() {
     };
   }, [activeView, refreshCaptureSession]);
 
-  // NEW: Auto-analyze hook that runs when the capture session hits "completed"
   useEffect(() => {
     if (
       activeView !== "live-capture" ||
@@ -499,7 +148,6 @@ function App() {
     };
   }, [activeView, captureSession?.capture_status]);
 
-  // UPDATED: Now receives and passes options down to startCaptureSession
   async function handleCaptureAction(action, options = {}) {
     setIsMutatingCapture(true);
     setCaptureError(null);
@@ -513,19 +161,7 @@ function App() {
       }
       await refreshCaptureSession();
     } catch (error) {
-      setCaptureError(error.message || "Real capture action failed.");
-    } finally {
-      setIsMutatingCapture(false);
-    }
-  }
-
-  async function handleRunWorkflowStep(stepId) {
-    setIsMutatingCapture(true);
-    try {
-      const session = await runCaptureWorkflowStep(stepId);
-      setCaptureSession(session);
-    } catch (error) {
-      window.console?.error?.(error);
+      setCaptureError(error.message || "Capture action failed.");
     } finally {
       setIsMutatingCapture(false);
     }
@@ -636,7 +272,6 @@ function App() {
             onStartCapture={(options) => handleCaptureAction("start", options)}
             onStopCapture={() => handleCaptureAction("stop")}
             onDownload={handleDownloadCapture}
-            onRunWorkflowStep={handleRunWorkflowStep}
           />
         ) : (
           <>
@@ -671,29 +306,41 @@ function App() {
 
             <ErrorBanner message={analysisError} />
 
+            {/* ROUTER LOGIC: Render content based on the active tab */}
             {r ? (
-              <>
-                <StatsRow summary={r.capture_summary} ipsec={r.ipsec} />
+              <div className="dashboard-grid">
+                
+                {/* VIEW: OVERVIEW */}
+                {activeView === "overview" && (
+                  <>
+                    <div className="full-width"><StatsRow summary={r.capture_summary} ipsec={r.ipsec} /></div>
+                    <SecurityGauge security={r.security} />
+                    <EvidencePosture ipsec={r.ipsec} traffic={r.traffic} findings={r.security.findings} />
+                    <TrafficClassification traffic={r.traffic} />
+                    <div className="full-width"><IpsecDetails ipsec={r.ipsec} /></div>
+                    <div className="full-width report-section">
+                      <ReportButton onDownload={handleDownloadReport} isGenerating={isGeneratingReport} error={reportError} />
+                    </div>
+                  </>
+                )}
 
-                <div className="dashboard-grid">
-                  <SecurityGauge security={r.security} />
-                  <EvidencePosture ipsec={r.ipsec} traffic={r.traffic} findings={r.security.findings} />
-                  <TrafficClassification traffic={r.traffic} />
-
-                  {r.capture_summary?.protocol_counts && (
-                    <ProtocolBreakdown protocols={r.capture_summary.protocol_counts} total={r.capture_summary.total_packets} />
-                  )}
-
-                  <IpsecDetails ipsec={r.ipsec} />
-                  <div className="full-width"><NetworkAddresses ipsec={r.ipsec} /></div>
-                  <div className="full-width"><SecurityFindings findings={r.security.findings} /></div>
-                  <div className="full-width report-section">
-                    <ReportButton onDownload={handleDownloadReport} isGenerating={isGeneratingReport} error={reportError} />
+                {/* VIEW: PROTOCOL SCAN */}
+                {activeView === "protocol-scan" && (
+                  <div className="full-width">
+                    <ProtocolScanView summary={r.capture_summary} ipsec={r.ipsec} />
                   </div>
-                </div>
-              </>
+                )}
+
+                {/* VIEW: RISK FINDINGS */}
+                {activeView === "risk-findings" && (
+                  <div className="full-width">
+                    <ThreatMatrixView security={r.security} />
+                  </div>
+                )}
+
+              </div>
             ) : (
-              !isAnalyzing && <EmptyState />
+              !isAnalyzing && activeView !== "overview" && <EmptyState />
             )}
           </>
         )}

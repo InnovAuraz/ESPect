@@ -1545,3 +1545,118 @@
     flex-direction: column;
   }
 }
+
+
+
+
+
+
+
+/* =========================================
+   RESPONSIVE COMMAND RAIL (UBUNTU STYLE)
+   ========================================= */
+
+/* 1. Default (Large screens) */
+@media (min-width: 1025px) {
+  .app-shell {
+    grid-template-columns: 320px 1fr !important; 
+    transition: grid-template-columns 0.3s ease;
+  }
+  .command-rail {
+    width: 320px !important;
+    min-width: 320px !important;
+    transition: width 0.3s ease;
+  }
+  .rail-item-label {
+    font-size: 1.1rem !important;
+    letter-spacing: 1px;
+  }
+  .rail-item-mark {
+    font-size: 1.3rem !important;
+    width: 30px !important;
+  }
+  .rail-brand {
+    font-size: 1.4rem !important;
+  }
+}
+
+/* 2. Ubuntu-style Collapsed (Tablets, laptops, and smaller windows) */
+@media (max-width: 1024px) {
+  .app-shell {
+    grid-template-columns: 80px 1fr !important; 
+    transition: grid-template-columns 0.3s ease;
+  }
+  
+  .command-rail {
+    width: 80px !important;
+    min-width: 80px !important;
+    align-items: center;
+    transition: width 0.3s ease;
+    overflow: visible !important; /* Crucial: allows tooltips to break out of the rail */
+  }
+  
+  /* Hide the extra brand text and footer to save vertical space */
+  .rail-brand span, .rail-footer {
+    display: none !important;
+  }
+  
+  /* Keep only the "ESPECT" part of the logo, scale it down */
+  .rail-brand {
+    font-size: 0.8rem !important;
+    text-align: center;
+    word-break: break-all;
+    line-height: 1.5;
+  }
+
+  /* Center the icons */
+  .rail-item {
+    justify-content: center !important;
+    padding: 1rem 0 !important;
+    position: relative; /* Anchor for the absolute tooltip */
+  }
+  
+  .rail-item-mark {
+    margin: 0 !important;
+    font-size: 1.5rem !important;
+  }
+
+  /* Turn labels into Ubuntu-style hover tooltips */
+  .rail-item-label {
+    position: absolute;
+    left: 95px; /* Start slightly further out for a slide-in effect */
+    top: 50%;
+    transform: translateY(-50%);
+    background: #0a0f14;
+    border: 1px solid #00ff9d;
+    color: #00ff9d;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    font-size: 0.9rem !important;
+    letter-spacing: 1px;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); /* Snappy bounce effect */
+    z-index: 9999;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.8);
+  }
+
+  /* Add the little tooltip triangle pointer */
+  .rail-item-label::before {
+    content: '';
+    position: absolute;
+    left: -5px;
+    top: 50%;
+    transform: translateY(-50%);
+    border-width: 5px 5px 5px 0;
+    border-style: solid;
+    border-color: transparent #00ff9d transparent transparent;
+  }
+
+  /* Trigger tooltip on hover */
+  .rail-item:hover .rail-item-label {
+    opacity: 1;
+    visibility: visible;
+    left: 80px; /* Slides in flush to the menu */
+  }
+}
