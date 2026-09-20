@@ -112,8 +112,15 @@ export async function fetchCaptureSession() {
   return response.json();
 }
 
-export async function startCaptureSession() {
-  const response = await request("/api/capture/start", { method: "POST" });
+// UPDATED: Now sends the Dual-Mode configuration (Random/Targeted, Traffic Type, Duration)
+export async function startCaptureSession(options = { mode: "random", traffic_type: "voip", duration: 30 }) {
+  const response = await request("/api/capture/start", { 
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(options)
+  });
 
   if (!response.ok) {
     const detail = await readErrorDetail(response, "Failed to start capture session.");
@@ -159,6 +166,18 @@ export async function downloadCaptureSession() {
   const filename = match ? match[1] : "capture_live_20260918.pcap";
 
   return { blob, filename };
+}
+
+// NEW: Tells the backend to directly analyze the newly generated live capture file
+export async function analyzeLiveCapture() {
+  const response = await request("/api/capture/analyze", { method: "POST" });
+  
+  if (!response.ok) {
+    const detail = await readErrorDetail(response, "Failed to analyze live capture.");
+    throw new ApiError(detail, { status: response.status });
+  }
+  
+  return response.json();
 }
 
 export { ApiError };

@@ -199,7 +199,7 @@ def run_capture(
                 min(0.25, remaining)
             )
 
-        controller.wait_for_traffic()
+        #controller.wait_for_traffic()
 
     finally:
         print("[6/6] Stopping capture...")

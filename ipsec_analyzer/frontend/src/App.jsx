@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 
 import {
@@ -10,6 +10,7 @@ import {
   stopCaptureSession,
   downloadCaptureSession,
   runCaptureWorkflowStep,
+  analyzeLiveCapture, // NEW: Import the live capture analysis route
 } from "./services/api";
 
 import Header from "./components/Header";
@@ -100,6 +101,7 @@ function createDefaultCaptureSession() {
 
 function LiveCaptureView({
   session,
+  captureError, // NEW: Receive error state
   isMutating,
   onStartCapture,
   onStopCapture,
@@ -107,14 +109,17 @@ function LiveCaptureView({
   onRunWorkflowStep,
 }) {
   const [tick, setTick] = useState(0);
+  
+  // NEW: State for execution parameters
+  const [mode, setMode] = useState("random");
+  const [trafficType, setTrafficType] = useState("voip");
+  const [duration, setDuration] = useState(30);
 
   useEffect(() => {
     if (!session || !session.is_running) return undefined;
-
     const intervalId = window.setInterval(() => {
       setTick((value) => value + 1);
     }, 1200);
-
     return () => window.clearInterval(intervalId);
   }, [session]);
 
@@ -132,22 +137,21 @@ function LiveCaptureView({
   const currentFlows = Number(telemetry.esp_flows || 0) + (tick % 5);
   const currentAlerts = Number(telemetry.alerts || 0) + (tick % 3 === 0 ? 1 : 0);
   const chartLevels = [
-    28 + (tick % 4) * 6,
-    36 + (tick % 5) * 7,
-    42 + (tick % 6) * 7,
-    58 + (tick % 4) * 8,
-    72 + (tick % 5) * 7,
-    68 + (tick % 6) * 8,
-    88 + (tick % 4) * 6,
-    100,
-    84 + (tick % 5) * 7,
-    72 + (tick % 4) * 6,
-    56 + (tick % 5) * 7,
-    42 + (tick % 4) * 6,
+    28 + (tick % 4) * 6, 36 + (tick % 5) * 7, 42 + (tick % 6) * 7,
+    58 + (tick % 4) * 8, 72 + (tick % 5) * 7, 68 + (tick % 6) * 8,
+    88 + (tick % 4) * 6, 100, 84 + (tick % 5) * 7,
+    72 + (tick % 4) * 6, 56 + (tick % 5) * 7, 42 + (tick % 4) * 6,
   ];
+
+  // NEW: Pass options up when starting capture
+  const handleStart = () => {
+    onStartCapture({ mode, traffic_type: trafficType, duration: Number(duration) });
+  };
 
   return (
     <div className="live-capture-view">
+      <ErrorBanner message={captureError} />
+      
       <div className="capture-header">
         <div>
           <div className="eyebrow">LIVE / CAPTURE SESSION</div>
@@ -157,7 +161,7 @@ function LiveCaptureView({
           <button
             type="button"
             className="btn-capture"
-            onClick={activeSession.is_running ? onStopCapture : onStartCapture}
+            onClick={activeSession.is_running ? onStopCapture : handleStart}
             disabled={isMutating}
           >
             {activeSession.is_running ? "Stop capture" : "Start capture"}
@@ -165,6 +169,58 @@ function LiveCaptureView({
           <button type="button" className="btn-secondary" onClick={onDownload} disabled={isMutating}>
             Download .pcap
           </button>
+        </div>
+      </div>
+
+      {/* NEW: Execution Parameters Control Panel */}
+      <div className="capture-controls card" style={{ marginBottom: "2rem", padding: "1.5rem" }}>
+        <div className="card-header" style={{ marginBottom: "1rem" }}>
+          <div className="card-title">Execution Parameters</div>
+          <div className="card-badge secure">SIH DEMO CONTROLS</div>
+        </div>
+        <div style={{ display: "flex", gap: "2rem", alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+            <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600 }}>OPERATION MODE</label>
+            <select 
+              value={mode} 
+              onChange={(e) => setMode(e.target.value)}
+              disabled={activeSession.is_running}
+              style={{ padding: "0.5rem", background: "var(--surface-sunken)", border: "1px solid var(--border)", color: "var(--text-main)", borderRadius: "4px" }}
+            >
+              <option value="random">Randomized (Auto-select)</option>
+              <option value="targeted">Targeted (Testing Mode)</option>
+            </select>
+          </div>
+          
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", opacity: mode === "random" ? 0.4 : 1, pointerEvents: mode === "random" ? "none" : "auto" }}>
+            <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600 }}>TRAFFIC TYPE</label>
+            <select 
+              value={trafficType} 
+              onChange={(e) => setTrafficType(e.target.value)}
+              disabled={activeSession.is_running}
+              style={{ padding: "0.5rem", background: "var(--surface-sunken)", border: "1px solid var(--border)", color: "var(--text-main)", borderRadius: "4px" }}
+            >
+              <option value="voip">VoIP (UDP)</option>
+              <option value="video">Video Streaming</option>
+              <option value="web">Web (HTTP/S)</option>
+              <option value="whatsapp">WhatsApp</option>
+              <option value="email">Email (SMTP/IMAP)</option>
+              <option value="icmp">ICMP (Ping)</option>
+            </select>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+            <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600 }}>DURATION (SEC)</label>
+            <input 
+              type="number" 
+              value={duration} 
+              onChange={(e) => setDuration(e.target.value)}
+              disabled={activeSession.is_running}
+              min="5"
+              max="120"
+              style={{ width: "80px", padding: "0.5rem", background: "var(--surface-sunken)", border: "1px solid var(--border)", color: "var(--text-main)", borderRadius: "4px" }}
+            />
+          </div>
         </div>
       </div>
 
@@ -320,7 +376,7 @@ function LiveCaptureView({
           </div>
           <div className="summary-actions">
             <button type="button" className="btn-secondary" onClick={onDownload}>Export report</button>
-            <button type="button" className="btn-capture" onClick={activeSession.is_running ? onStopCapture : onStartCapture} disabled={isMutating}>
+            <button type="button" className="btn-capture" onClick={activeSession.is_running ? onStopCapture : handleStart} disabled={isMutating}>
               {activeSession.is_running ? "Stop session" : "Save session"}
             </button>
           </div>
@@ -340,9 +396,15 @@ function App() {
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [reportError, setReportError] = useState(null);
   const [activeView, setActiveView] = useState("overview");
+  
   const [captureSession, setCaptureSession] = useState(null);
+  const [captureError, setCaptureError] = useState(null); // NEW: Track capture errors
   const [isLoadingCapture, setIsLoadingCapture] = useState(false);
   const [isMutatingCapture, setIsMutatingCapture] = useState(false);
+
+  // NEW: Refs to prevent infinite auto-analysis loops
+  const autoAnalyzedCapture = useRef(false);
+  const captureRunRequested = useRef(false);
 
   const refreshCaptureSession = useCallback(async () => {
     if (activeView !== "live-capture") return;
@@ -379,15 +441,79 @@ function App() {
     return () => { ignore = true; };
   }, []);
 
-  async function handleCaptureAction(action) {
+  // NEW: Polling hook to automatically check capture status
+  useEffect(() => {
+    if (activeView !== "live-capture") return undefined;
+    const initialRefresh = window.setTimeout(() => {
+      void refreshCaptureSession();
+    }, 0);
+    const intervalId = window.setInterval(() => {
+      void refreshCaptureSession();
+    }, 2000);
+    return () => {
+      window.clearTimeout(initialRefresh);
+      window.clearInterval(intervalId);
+    };
+  }, [activeView, refreshCaptureSession]);
+
+  // NEW: Auto-analyze hook that runs when the capture session hits "completed"
+  useEffect(() => {
+    if (
+      activeView !== "live-capture" ||
+      !captureRunRequested.current ||
+      captureSession?.capture_status !== "completed" ||
+      autoAnalyzedCapture.current
+    ) {
+      return undefined;
+    }
+
+    autoAnalyzedCapture.current = true;
+    let cancelled = false;
+
+    async function analyzeCompletedCapture() {
+      setIsAnalyzing(true);
+      setCaptureError(null);
+      try {
+        const result = await analyzeLiveCapture();
+        if (cancelled) return;
+
+        const { blob, filename } = await downloadCaptureSession();
+        const file = new File([blob], filename, { type: "application/vnd.tcpdump.pcap" });
+        
+        setSelectedFile(file);
+        setAnalysisResult(result);
+        setActiveView("overview");
+      } catch (error) {
+        if (!cancelled) {
+          autoAnalyzedCapture.current = false;
+          setCaptureError(error.message || "Automatic PCAP analysis failed.");
+        }
+      } finally {
+        if (!cancelled) setIsAnalyzing(false);
+      }
+    }
+
+    void analyzeCompletedCapture();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeView, captureSession?.capture_status]);
+
+  // UPDATED: Now receives and passes options down to startCaptureSession
+  async function handleCaptureAction(action, options = {}) {
     setIsMutatingCapture(true);
+    setCaptureError(null);
     try {
       if (action === "start") {
-        await startCaptureSession();
+        captureRunRequested.current = true;
+        autoAnalyzedCapture.current = false;
+        await startCaptureSession(options);
       } else if (action === "stop") {
         await stopCaptureSession();
       }
       await refreshCaptureSession();
+    } catch (error) {
+      setCaptureError(error.message || "Real capture action failed.");
     } finally {
       setIsMutatingCapture(false);
     }
@@ -504,9 +630,10 @@ function App() {
         {activeView === "live-capture" ? (
           <LiveCaptureView
             session={captureSession}
+            captureError={captureError}
             isLoading={isLoadingCapture}
             isMutating={isMutatingCapture}
-            onStartCapture={() => handleCaptureAction("start")}
+            onStartCapture={(options) => handleCaptureAction("start", options)}
             onStopCapture={() => handleCaptureAction("stop")}
             onDownload={handleDownloadCapture}
             onRunWorkflowStep={handleRunWorkflowStep}

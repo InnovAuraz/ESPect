@@ -124,9 +124,15 @@ def serve(
                         "error": f"Invalid request: {exc}",
                     }
 
-                connection.sendall(
-                    json.dumps(response).encode()
-                )
+                # FIXED: Safely handle BrokenPipeError so VM2 never crashes
+                try:
+                    connection.sendall(
+                        json.dumps(response).encode()
+                    )
+                except BrokenPipeError:
+                    pass
+                except Exception as exc:
+                    print(f"Socket send error: {exc}")
 
 
 def _handle(request: dict) -> dict:

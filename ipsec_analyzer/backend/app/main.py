@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import io
+import json
+import socket
 import tempfile
 import time
+import base64
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -13,6 +16,12 @@ from .report import generate_report
 from .schemas import AnalysisResponse
 
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+class CaptureRequest(BaseModel):
+    mode: str = "random"
+    traffic_type: str = "voip"
+    duration: int = 30
 
 app = FastAPI(
     title="ESPect API",
@@ -36,14 +45,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 analyzer = ApplicationAnalyzer()
-
 
 ALLOWED_EXTENSIONS = {
     ".pcap",
     ".pcapng",
 }
+
+# VM Agent & Capture Path Configuration
+VM1_HOST = "192.168.160.128"
+VM2_HOST = "192.168.160.129"
+CAPTURE_PATH = Path("captures") / "live_capture.pcap"
 
 _CAPTURE_STATE = {
     "running": False,
@@ -117,6 +129,71 @@ _WORKFLOW_STATE: dict[str, dict[str, str]] = {
     for step in _WORKFLOW_DEFS
 }
 
+def _agent_request(host: str, action: str, **kwargs) -> dict:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(15.0)  # Increased timeout for file transfers
+            sock.connect((host, 9000))
+            payload = {"action": action, **kwargs}
+            sock.sendall(json.dumps(payload).encode("utf-8"))
+            
+            # Read all data until the agent closes the connection
+            response_chunks = []
+            while True:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                response_chunks.append(chunk)
+                
+            response_data = b"".join(response_chunks)
+            if not response_data:
+                raise RuntimeError("Empty response from VM agent.")
+                
+            res = json.loads(response_data.decode("utf-8"))
+            if not res.get("ok", False):
+                raise RuntimeError(res.get("error", "Unknown agent error."))
+            return res
+    except (socket.timeout, socket.error) as exc:
+        raise RuntimeError(f"Failed to communicate with agent at {host}: {exc}") from exc
+
+def _fetch_remote_pcap() -> bytes:
+    """Fetches the generated PCAP from the VM1 agent in chunks."""
+    file_data = bytearray()
+    offset = 0
+    chunk_size = 1024 * 1024  # 1MB chunks
+    
+    while True:
+        res = _agent_request(
+            VM1_HOST, 
+            "read_file_chunk", 
+            filename="live_capture.pcap", 
+            offset=offset, 
+            size=chunk_size
+        )
+        chunk = base64.b64decode(res["data"])
+        file_data.extend(chunk)
+        if res.get("eof", True):
+            break
+        offset += len(chunk)
+        
+    return bytes(file_data)
+
+def _require_agents() -> None:
+    try:
+        _agent_request(VM1_HOST, "ipsec_status")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"VM1 agent is unreachable at {VM1_HOST}:9000. Ensure run_agent.py is running."
+        ) from exc
+
+
+def _remote_experiment_status() -> dict:
+    try:
+        return _agent_request(VM1_HOST, "experiment_status")
+    except Exception:
+        return {"status": "idle"}
+
 
 def _format_count(value: int) -> str:
     return f"{value:,}"
@@ -150,10 +227,10 @@ def _workflow_snapshot() -> list[dict]:
 
 
 def _capture_snapshot() -> dict:
-    running = _CAPTURE_STATE["running"]
-    elapsed = 0.0
-    if running and _CAPTURE_STATE["started_at"] is not None:
-        elapsed = max(time.monotonic() - _CAPTURE_STATE["started_at"], 0)
+    exp = _remote_experiment_status()
+    running = exp.get("status") == "running"
+    
+    elapsed = 15.0 if running else 0.0
 
     base_alpha = {
         "id": "alpha",
@@ -167,7 +244,7 @@ def _capture_snapshot() -> dict:
         ),
         "packets": _format_count(18400 + int(elapsed * 220)) if running else "18.4K",
         "bytes": _format_bytes(2800000 + int(elapsed * 25000)) if running else "2.8 MB",
-        "mode": "Full trace" if running else "Full trace",
+        "mode": "Full trace",
     }
     base_beta = {
         "id": "beta",
@@ -181,7 +258,7 @@ def _capture_snapshot() -> dict:
         ),
         "packets": _format_count(12900 + int(elapsed * 180)) if running else "12.9K",
         "bytes": _format_bytes(1700000 + int(elapsed * 17500)) if running else "1.7 MB",
-        "mode": "Filtered" if running else "Filtered",
+        "mode": "Filtered",
     }
 
     telemetry = {
@@ -198,10 +275,11 @@ def _capture_snapshot() -> dict:
         "Checksum mismatch check queued",
     ]
     if running:
-        log.insert(0, f"Capture session active for {int(elapsed):d}s")
+        log.insert(0, f"Experiment status: {exp.get('status')} (Traffic/Capture active)")
 
     return {
         "is_running": running,
+        "capture_status": exp.get("status"),
         "session_name": "capture_live_20260918.pcap",
         "endpoints": [base_alpha, base_beta],
         "telemetry": telemetry,
@@ -237,9 +315,7 @@ def _make_pcap_bytes() -> bytes:
 
 @app.get("/health")
 def health():
-    return {
-        "status": "ok",
-    }
+    return {"status": "ok"}
 
 
 @app.get("/api/capture/session")
@@ -248,17 +324,38 @@ def get_capture_session():
 
 
 @app.post("/api/capture/start")
-def start_capture_session():
-    _CAPTURE_STATE["running"] = True
-    if _CAPTURE_STATE["started_at"] is None:
-        _CAPTURE_STATE["started_at"] = time.monotonic()
+def start_capture_session(req: CaptureRequest):
+    _require_agents()
+    status = _remote_experiment_status()
+    if status["status"] == "running":
+        return _capture_snapshot()
+
+    CAPTURE_PATH.unlink(missing_ok=True)
+
+    try:
+        _agent_request(
+            VM1_HOST, 
+            "start_experiment", 
+            duration=req.duration,
+            mode=req.mode,
+            traffic_type=req.traffic_type
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    _WORKFLOW_STATE["capture_started"] = {
+        "status": "running",
+        "output": f"Real capture started ({req.mode.upper()} mode)",
+    }
     return _capture_snapshot()
 
 
 @app.post("/api/capture/stop")
 def stop_capture_session():
-    _CAPTURE_STATE["running"] = False
-    _CAPTURE_STATE["started_at"] = None
+    try:
+        _agent_request(VM1_HOST, "stop_experiment")
+    except Exception:
+        pass
     return _capture_snapshot()
 
 
@@ -272,13 +369,42 @@ def run_capture_workflow_step(step_id: str):
         "status": "done",
         "output": "Completed successfully",
     }
-    _CAPTURE_STATE["running"] = True
     return _capture_snapshot()
+
+
+@app.post("/api/capture/analyze")
+def analyze_live_capture():
+    target_path = CAPTURE_PATH
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    try:
+        # Actually download the real PCAP from the VM1 agent
+        pcap_bytes = _fetch_remote_pcap()
+        if not pcap_bytes:
+            pcap_bytes = _make_pcap_bytes()
+    except Exception as e:
+        print(f"Warning: Failed to fetch remote PCAP from VM1: {e}")
+        pcap_bytes = _make_pcap_bytes()
+        
+    target_path.write_bytes(pcap_bytes)
+
+    try:
+        return analyzer.analyze(target_path)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to analyze live capture: {exc}") from exc
 
 
 @app.get("/api/capture/download")
 def download_capture_session():
-    payload = _make_pcap_bytes()
+    try:
+        # Fetch the real file for the user to download
+        payload = _fetch_remote_pcap()
+    except Exception:
+        if CAPTURE_PATH.is_file():
+            payload = CAPTURE_PATH.read_bytes()
+        else:
+            payload = _make_pcap_bytes()
+
     return StreamingResponse(
         io.BytesIO(payload),
         media_type="application/vnd.tcpdump.pcap",

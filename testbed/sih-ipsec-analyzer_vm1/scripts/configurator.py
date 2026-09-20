@@ -141,12 +141,9 @@ def main() -> None:
         exist_ok=True,
     )
 
-    with output.open(
-        "w",
-        encoding="utf-8",
-    ) as file:
+    with output.open("w", encoding="utf-8") as file:
         yaml.safe_dump(
-            configuration,
+            {"configuration": configuration},  # <--- Wraps it perfectly
             file,
             sort_keys=False,
         )
