@@ -1,3 +1,4 @@
+// AnalysisLoading.jsx
 export default function AnalysisLoading() {
   return (
     <div className="loading-overlay">

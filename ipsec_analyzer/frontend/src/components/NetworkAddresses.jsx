@@ -8,7 +8,7 @@ export default function NetworkAddresses({ ipsec }) {
     <div className="card">
       <div className="card-header">
         <span className="card-title">
-          <span className="card-title-icon">🌐</span>
+          <span className="card-title-icon" style={{ color: "var(--neon-cyan)" }}>🌐</span>
           Network Endpoints
         </span>
         <span className="card-badge secure">{ipsec.ip_version ?? "—"}</span>

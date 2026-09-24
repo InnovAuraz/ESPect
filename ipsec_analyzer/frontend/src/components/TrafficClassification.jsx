@@ -17,39 +17,74 @@ export default function TrafficClassification({ traffic }) {
         y={50 - height} 
         width="4" 
         height={height} 
-        fill={isActive ? "#00ff9d" : "#1a2634"} 
-        style={{ transition: "all 0.5s ease" }}
+        fill={isActive ? "var(--neon-purple)" : "rgba(255,255,255,0.05)"} 
+        style={{ transition: "all 0.5s cubic-bezier(0.4, 0, 0.2, 1)" }}
       />
     );
   });
 
   return (
-    <div className="card" style={{ padding: "1.5rem", display: "flex", flexDirection: "column", justifyContent: "space-between", position: "relative" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1.5rem" }}>
-        <div style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#e2e8f0", display: "flex", alignItems: "center", gap: "8px", letterSpacing: "1px" }}>
-          <span style={{ color: "#00ff9d", fontSize: "1.2rem" }}>✇</span> DEEP PACKET INSPECTION
+    <div className="card" style={{ padding: "24px", display: "flex", flexDirection: "column", justifyContent: "space-between", position: "relative" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "24px" }}>
+        <div style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-primary)", display: "flex", alignItems: "center", gap: "10px", letterSpacing: "1px" }}>
+          <span style={{ color: "var(--neon-purple)", fontSize: "18px" }}>✇</span> DEEP PACKET INSPECTION
         </div>
-        <div style={{ fontSize: "0.65rem", background: "rgba(0,255,157,0.1)", color: "#00ff9d", padding: "3px 8px", borderRadius: "3px", border: "1px solid rgba(0,255,157,0.3)", letterSpacing: "1px", fontWeight: "bold" }}>
+        <div style={{ 
+          fontSize: "10px", 
+          background: "rgba(157, 78, 221, 0.1)", 
+          color: "var(--neon-purple)", 
+          padding: "4px 12px", 
+          borderRadius: "20px", 
+          border: "1px solid rgba(157, 78, 221, 0.3)", 
+          letterSpacing: "1px", 
+          fontWeight: "800",
+          boxShadow: "var(--shadow-glow-purple)"
+        }}>
           ML INFERENCE
         </div>
       </div>
 
       <div style={{ textAlign: "center", flexGrow: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ fontSize: "3rem", fontWeight: "900", color: "#00ff9d", textShadow: "0 0 20px rgba(0,255,157,0.5)", textTransform: "uppercase", letterSpacing: "4px" }}>
+        <div style={{ 
+          fontSize: "clamp(32px, 4vw, 48px)", 
+          fontWeight: "900", 
+          color: "var(--neon-cyan)", 
+          textShadow: "var(--shadow-glow-cyan)", 
+          textTransform: "uppercase", 
+          letterSpacing: "4px" 
+        }}>
           {traffic.predicted_type}
         </div>
       </div>
 
-      <div style={{ marginTop: "1.5rem" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", color: "#64748b", marginBottom: "0.5rem", fontFamily: "monospace" }}>
-          <span>NEURAL NET CONFIDENCE MAP</span>
-          <span style={{ color: "#00ff9d", fontWeight: "bold" }}>{confPct}%</span>
+      <div style={{ marginTop: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "var(--text-muted)", marginBottom: "8px", fontFamily: "var(--font-mono)", fontWeight: "700" }}>
+          <span style={{ letterSpacing: "1px" }}>NEURAL NET CONFIDENCE MAP</span>
+          <span style={{ color: "var(--neon-purple)", fontWeight: "800", textShadow: "var(--shadow-glow-purple)" }}>{confPct}%</span>
         </div>
         
         {/* Static Mathematical Graph */}
-        <div style={{ height: "60px", width: "100%", background: "#06090c", border: "1px solid #1a2634", borderRadius: "4px", position: "relative", overflow: "hidden", display: "flex", alignItems: "flex-end", padding: "5px" }}>
-           <div style={{ position: "absolute", inset: 0, backgroundImage: "linear-gradient(#1a2634 1px, transparent 1px), linear-gradient(90deg, #1a2634 1px, transparent 1px)", backgroundSize: "15px 15px", opacity: 0.2 }} />
-           <svg width="100%" height="100%" viewBox="0 0 300 50" preserveAspectRatio="none" style={{ position: "absolute", bottom: 0, left: "5px" }}>
+        <div style={{ 
+          height: "70px", 
+          width: "100%", 
+          background: "rgba(0,0,0,0.3)", 
+          border: "1px solid rgba(255,255,255,0.05)", 
+          borderRadius: "8px", 
+          position: "relative", 
+          overflow: "hidden", 
+          display: "flex", 
+          alignItems: "flex-end", 
+          padding: "5px", 
+          boxShadow: "inset 0 0 20px rgba(0,0,0,0.5)" 
+        }}>
+           <div style={{ 
+             position: "absolute", 
+             inset: 0, 
+             backgroundImage: "linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)", 
+             backgroundSize: "15px 15px", 
+             pointerEvents: "none" 
+           }} />
+           <svg width="100%" height="100%" viewBox="0 0 300 50" preserveAspectRatio="none" style={{ position: "absolute", bottom: 0, left: "5px", right: "5px", width: "calc(100% - 10px)" }}>
               {bars}
            </svg>
         </div>

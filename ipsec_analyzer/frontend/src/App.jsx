@@ -28,15 +28,19 @@ import NetworkAddresses from "./components/NetworkAddresses";
 import SecurityFindings from "./components/SecurityFindings";
 import ReportButton from "./components/ReportButton";
 import EmptyState from "./components/EmptyState";
-
-// NEW: Import the extracted LiveCaptureView component
 import LiveCaptureView from "./components/LiveCaptureView";
+
+// NEW IMPORTS
+import StartupGuide from "./components/StartupGuide";
+import SystemInternals from "./components/SystemInternals";
 
 const navItems = [
   { id: "overview", label: "Overview", icon: "◈" },
   { id: "protocol-scan", label: "Protocol scan", icon: "▣" },
   { id: "live-capture", label: "Live capture", icon: "⇄" },
   { id: "risk-findings", label: "Risk findings", icon: "⚑" },
+  { id: "startup-guide", label: "Startup Guide", icon: "⎈" },
+  { id: "system-internals", label: "System Internals", icon: "⌗" },
 ];
 
 function App() {
@@ -273,6 +277,10 @@ function App() {
             onStopCapture={() => handleCaptureAction("stop")}
             onDownload={handleDownloadCapture}
           />
+        ) : activeView === "startup-guide" ? (
+          <StartupGuide />
+        ) : activeView === "system-internals" ? (
+          <SystemInternals />
         ) : (
           <>
             <Header
@@ -306,11 +314,9 @@ function App() {
 
             <ErrorBanner message={analysisError} />
 
-            {/* ROUTER LOGIC: Render content based on the active tab */}
             {r ? (
               <div className="dashboard-grid">
                 
-                {/* VIEW: OVERVIEW */}
                 {activeView === "overview" && (
                   <>
                     <div className="full-width"><StatsRow summary={r.capture_summary} ipsec={r.ipsec} /></div>
@@ -324,14 +330,12 @@ function App() {
                   </>
                 )}
 
-                {/* VIEW: PROTOCOL SCAN */}
                 {activeView === "protocol-scan" && (
                   <div className="full-width">
                     <ProtocolScanView summary={r.capture_summary} ipsec={r.ipsec} />
                   </div>
                 )}
 
-                {/* VIEW: RISK FINDINGS */}
                 {activeView === "risk-findings" && (
                   <div className="full-width">
                     <ThreatMatrixView security={r.security} />

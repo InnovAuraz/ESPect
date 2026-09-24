@@ -1,3 +1,5 @@
+import React from 'react';
+
 export default function ProtocolBreakdown({ protocols, total }) {
   if (!protocols || total === 0) return null;
 

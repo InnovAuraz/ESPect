@@ -26,7 +26,7 @@ export default function EvidencePosture({ ipsec, traffic, findings }) {
     <div className="card evidence-card">
       <div className="card-header">
         <span className="card-title">
-          <span className="card-title-icon">◈</span>
+          <span className="card-title-icon" style={{ color: "var(--neon-purple)", textShadow: "var(--shadow-glow-purple)" }}>◈</span>
           Evidence Posture
         </span>
         <span className="card-badge secure">Traceable result</span>

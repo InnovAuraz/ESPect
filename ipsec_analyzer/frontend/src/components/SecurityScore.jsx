@@ -11,28 +11,28 @@ export default function SecurityScore({ security }) {
   const radius = 52;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (score / 100) * circumference;
-  const strokeColor = `var(--status-${
-    status === "SECURE" ? "secure" : status === "CRITICAL" ? "critical" : "warning"
-  })`;
+  
+  const strokeColor = 
+    status === "SECURE" ? "var(--emerald-400)" : 
+    status === "CRITICAL" ? "var(--neon-red)" : 
+    "var(--neon-orange)";
 
   return (
-    <div className="panel">
-      <div className="panel-title">Security Score</div>
-      <div className="score-panel">
-        <div className="score-ring-wrap">
-          <svg width="128" height="128" viewBox="0 0 128 128">
+    <div className="card">
+      <div className="card-header">
+        <span className="card-title">Security Score</span>
+      </div>
+      <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+        <div className="score-ring-wrap" style={{ position: 'relative', width: '128px', height: '128px', filter: `drop-shadow(0 0 10px ${strokeColor}40)` }}>
+          <svg width="128" height="128" viewBox="0 0 128 128" style={{ transform: 'rotate(-90deg)' }}>
             <circle
-              cx="64"
-              cy="64"
-              r={radius}
+              cx="64" cy="64" r={radius}
               fill="none"
-              stroke="var(--border-subtle)"
+              stroke="rgba(255,255,255,0.05)"
               strokeWidth="10"
             />
             <circle
-              cx="64"
-              cy="64"
-              r={radius}
+              cx="64" cy="64" r={radius}
               fill="none"
               stroke={strokeColor}
               strokeWidth="10"
@@ -42,15 +42,17 @@ export default function SecurityScore({ security }) {
               style={{ transition: "stroke-dashoffset 0.5s ease" }}
             />
           </svg>
-          <div className="score-ring-value">
-            <span className="score-ring-number">{score}</span>
-            <span className="score-ring-max">/ 100</span>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ fontSize: '32px', fontWeight: '800', color: strokeColor, textShadow: `0 0 10px ${strokeColor}`, lineHeight: '1' }}>{score}</span>
+            <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>/ 100</span>
           </div>
         </div>
 
         <div className="score-copy">
-          <span className={`status-badge ${status}`}>{status}</span>
-          <p className="score-copy-desc">
+          <span className={`card-badge ${status === "SECURE" ? "secure" : status === "CRITICAL" ? "critical" : "warning"}`} style={{ display: 'inline-block', marginBottom: '8px' }}>
+            {status}
+          </span>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '12px', margin: 0, lineHeight: '1.5' }}>
             {STATUS_COPY[status] || "Security status could not be classified."}
           </p>
         </div>

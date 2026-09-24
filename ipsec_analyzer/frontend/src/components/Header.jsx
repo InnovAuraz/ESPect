@@ -1,3 +1,4 @@
+// Header.jsx
 export default function Header({ status, onRefresh, isChecking }) {
   const label = isChecking ? "Connecting…" : status === "online" ? "Online" : "Offline";
   const dotClass = isChecking ? "checking" : status === "online" ? "online" : "offline";
