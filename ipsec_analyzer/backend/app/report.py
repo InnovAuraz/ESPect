@@ -63,30 +63,30 @@ def generate_report(
 
     ipsec_data = [
         ["Property", "Value"],
-        ["IP Version", ipsec.ip_version or "Unknown"],
+        ["IP Version", ipsec.ip_version or "Not visible in capture"],
         ["IKE Detected", str(ipsec.ike_detected)],
-        ["IKE Version", ipsec.ike_version or "Unknown"],
+        ["IKE Version", ipsec.ike_version or "Not visible in capture"],
         [
             "IKE Exchange Types",
             ", ".join(ipsec.ike_exchange_types)
             if ipsec.ike_exchange_types
-            else "Unknown",
+            else "Not visible in capture",
         ],
         [
             "IKE Encryption",
-            ipsec.ike_encryption or "Unknown",
+            ipsec.ike_encryption or "Not visible in capture",
         ],
         [
             "IKE Integrity",
-            ipsec.ike_integrity or "Unknown",
+            ipsec.ike_integrity or "Not visible in capture",
         ],
         [
             "IKE PRF",
-            ipsec.ike_prf or "Unknown",
+            ipsec.ike_prf or "Not visible in capture",
         ],
         [
             "IKE DH Group",
-            ipsec.ike_dh_group or "Unknown",
+            ipsec.ike_dh_group or "Not visible in capture",
         ],
         ["ESP Detected", str(ipsec.esp_detected)],
         ["ESP Packets", str(ipsec.esp_packet_count)],
@@ -99,18 +99,18 @@ def generate_report(
         ],
         [
             "ESP Encryption",
-            ipsec.esp_encryption or "Unknown",
+            ipsec.esp_encryption or "Not visible in capture",
         ],
         [
             "ESP Integrity",
-            ipsec.esp_integrity or "Unknown",
+            ipsec.esp_integrity or "Not visible in capture",
         ],
         [
             "ESP PFS",
             (
                 str(ipsec.esp_pfs)
                 if ipsec.esp_pfs is not None
-                else "Unknown"
+                else "Not visible in capture"
             ),
         ],
         [
@@ -125,7 +125,7 @@ def generate_report(
             if ipsec.destination_addresses
             else "None",
         ],
-        ["IPsec Mode", ipsec.mode or "Unknown"],
+        ["IPsec Mode", ipsec.mode or "Not visible in capture"],
     ]
 
     ipsec_table = Table(

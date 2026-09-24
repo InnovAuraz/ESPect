@@ -46,3 +46,6 @@ if __name__ == "__main__":
     trainer.train()
 
     print("Training complete.")
+
+    from collections import Counter
+    print(f"  Class Distribution: {Counter(dataset.train_labels)}")

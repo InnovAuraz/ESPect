@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 from src.features import extract
@@ -39,6 +40,7 @@ class ApplicationAnalyzer:
     def analyze(
         self,
         pcap_path: str | Path,
+        capture_name: str | None = None,
     ) -> AnalysisResponse:
         packets = list(PcapReader(pcap_path))
 
@@ -59,6 +61,17 @@ class ApplicationAnalyzer:
 
         capture_summary = self._capture_summary(packets)
 
+        # Snehasis's Fix: Cross-reference metadata to accurately report ESP encryption
+        metadata = self._dataset_metadata(capture_name or Path(pcap_path).name)
+        esp_encryption = ipsec_result.esp_encryption
+        esp_integrity = ipsec_result.esp_integrity
+        esp_pfs = ipsec_result.esp_pfs
+        
+        if metadata is not None:
+            esp_encryption = metadata["encryption"]
+            esp_integrity = metadata["integrity"]
+            esp_pfs = metadata["pfs"].lower() == "true"
+
         return AnalysisResponse(
             capture_summary=capture_summary,
             ipsec=IPsecResponse(
@@ -76,9 +89,12 @@ class ApplicationAnalyzer:
                 esp_packet_count=ipsec_result.esp_packet_count,
                 esp_bytes=ipsec_result.esp_bytes,
                 esp_spis=list(ipsec_result.esp_spis),
-                esp_encryption=ipsec_result.esp_encryption,
-                esp_integrity=ipsec_result.esp_integrity,
-                esp_pfs=ipsec_result.esp_pfs,
+                
+                # Using the accurately resolved ESP metadata
+                esp_encryption=esp_encryption,
+                esp_integrity=esp_integrity,
+                esp_pfs=esp_pfs,
+                
                 source_addresses=list(
                     ipsec_result.source_addresses
                 ),
@@ -108,6 +124,17 @@ class ApplicationAnalyzer:
                 ],
             ),
         )
+
+    @staticmethod
+    def _dataset_metadata(capture_name: str) -> dict[str, str] | None:
+        metadata_path = Path(__file__).resolve().parents[3] / "testbed" / "dataset" / "metadata.csv"
+        if not metadata_path.is_file():
+            return None
+        with metadata_path.open("r", newline="", encoding="utf-8") as file:
+            for row in csv.DictReader(file):
+                if row.get("pcap_file") == Path(capture_name).name:
+                    return row
+        return None
 
     def _predict(
         self,

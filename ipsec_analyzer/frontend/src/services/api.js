@@ -113,12 +113,13 @@ export async function fetchCaptureSession() {
 }
 
 // UPDATED: Now sends the Dual-Mode configuration (Random/Targeted, Traffic Type, Duration)
-export async function startCaptureSession(options = { mode: "random", traffic_type: "voip", duration: 30 }) {
+export async function startCaptureSession(options = {}) {
   const response = await request("/api/capture/start", { 
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
+    // Now it strictly sends exactly what the UI tells it to send!
     body: JSON.stringify(options)
   });
 
