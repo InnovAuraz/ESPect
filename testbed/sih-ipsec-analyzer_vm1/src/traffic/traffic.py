@@ -1,3 +1,12 @@
+"""Controlled application-like traffic generator for the ESPect VMs.
+
+The public interface intentionally remains compatible with the existing agent:
+
+    python -m src.traffic.traffic --run <type> --role <role> --target <IP>
+
+Install this exact file as src/traffic/traffic.py on BOTH VM1 and VM2.
+"""
+
 import argparse
 import random
 import socket
@@ -18,80 +27,85 @@ TRAFFIC_TYPES = {
     "whatsapp",
 }
 
-ROLES = {
-    "sender",
-    "receiver",
-    "peer",
-}
+ROLES = {"sender", "receiver", "peer"}
 
-# Dedicated ports so multiple traffic profiles can run independently.
+# Keep the existing service ports unchanged.
 WEB_PORT = 8080
 EMAIL_PORT = 2525
 VIDEO_PORT = 5001
 VOIP_PORT = 5002
 WHATSAPP_PORT = 8081
 
-# ICMP
-ICMP_COUNT = 10
-ICMP_INTERVAL = 0.2
+# ---------------------------------------------------------------------------
+# Profile controls
+# ---------------------------------------------------------------------------
 
-# WEB: 10 page loads with realistic response sizes and reading delay.
-WEB_REQUESTS = 10
-WEB_MIN_PAYLOAD = 50_000
-WEB_MAX_PAYLOAD = 500_000
-WEB_MIN_DELAY = 0.5
-WEB_MAX_DELAY = 2.5
-WEB_CONNECT_RETRIES = 20
-WEB_CONNECT_RETRY_DELAY = 0.1
-WEB_REQUEST_TIMEOUT = 10
-WEB_RECEIVER_TIMEOUT = (
-    WEB_REQUESTS * WEB_REQUEST_TIMEOUT
-    + max(0, WEB_REQUESTS - 1) * WEB_MAX_DELAY
-    + 15
-)
+# ICMP: low-rate, small periodic request/reply flow.
+ICMP_COUNT = 20
+ICMP_INTERVAL = 0.25
+ICMP_PAYLOAD_SIZE = 64
+ICMP_RECEIVER_GRACE = 2.0
 
-# EMAIL
-EMAIL_MIN_BODY = 500
-EMAIL_MAX_BODY = 5_000
-EMAIL_CONNECT_RETRIES = 20
-EMAIL_CONNECT_RETRY_DELAY = 0.1
-EMAIL_SOCKET_TIMEOUT = 15
+# WEB: several short-lived HTTP page loads with large, variable responses.
+WEB_REQUESTS = 8
+WEB_MIN_PAYLOAD = 80_000
+WEB_MAX_PAYLOAD = 420_000
+WEB_MIN_DELAY = 0.25
+WEB_MAX_DELAY = 0.65
+WEB_CONNECT_RETRIES = 30
+WEB_CONNECT_RETRY_DELAY = 0.10
+WEB_REQUEST_TIMEOUT = 8
+WEB_RECEIVER_TIMEOUT = 15
 
-# VIDEO: 30 FPS, with I-frame-like bursts and variable UDP packet sizes.
-VIDEO_DURATION = 5
+# EMAIL: a small number of separate SMTP-like TCP sessions with medium bursts.
+EMAIL_MESSAGES = 2
+EMAIL_MIN_BODY = 4_000
+EMAIL_MAX_BODY = 10_000
+EMAIL_CONNECT_RETRIES = 30
+EMAIL_CONNECT_RETRY_DELAY = 0.10
+EMAIL_SOCKET_TIMEOUT = 10
+EMAIL_INTER_MESSAGE_DELAY = (0.45, 0.90)
+
+# VIDEO: UDP frame bursts. The one-second I-frame cadence is deliberately
+# different from VoIP's steady 20 ms cadence.
+VIDEO_DURATION = 5.0
 VIDEO_FPS = 30
-VIDEO_MIN_PACKET_SIZE = 1_000
-VIDEO_MAX_PACKET_SIZE = 1_400
+VIDEO_MIN_PACKET_SIZE = 1_050
+VIDEO_MAX_PACKET_SIZE = 1_350
 VIDEO_I_FRAME_EVERY = 30
-VIDEO_I_FRAME_PACKETS = (8, 15)
-VIDEO_P_FRAME_PACKETS = (1, 4)
-VIDEO_RECEIVER_GRACE = 3
+VIDEO_I_FRAME_PACKETS = (10, 18)
+VIDEO_P_FRAME_PACKETS = (2, 4)
+VIDEO_STARTUP_DELAY = 0.30
+VIDEO_RECEIVER_GRACE = 1.5
 VIDEO_RECEIVE_BUFFER = 65_535
 
-# VOIP
-VOIP_DURATION = 5
-VOIP_INTERVAL = 0.02
+# VOIP: fixed-size RTP-like packets at a 20 ms cadence, bidirectional because
+# both VMs run the peer role.
+VOIP_DURATION = 5.0
+VOIP_INTERVAL = 0.020
 VOIP_PACKET_SIZE = 160
-VOIP_RECEIVE_BUFFER = 4096
+VOIP_JITTER = 0.0015
+VOIP_STARTUP_DELAY = 0.30
+VOIP_RECEIVE_BUFFER = 4_096
 
-# WHATSAPP-like controlled TCP messaging.
-WHATSAPP_MESSAGES = 20
-WHATSAPP_MIN_MESSAGE_SIZE = 10
-WHATSAPP_MAX_MESSAGE_SIZE = 400
-WHATSAPP_MIN_DELAY = 0.5
-WHATSAPP_MAX_DELAY = 3.5
-WHATSAPP_CONNECT_RETRIES = 20
-WHATSAPP_CONNECT_RETRY_DELAY = 0.1
-WHATSAPP_SOCKET_TIMEOUT = 15
+# WHATSAPP-like messaging: one long TCP session, tiny text bursts, irregular
+# human-style gaps, length framing and ACKs.
+WHATSAPP_MESSAGES = 12
+WHATSAPP_MIN_MESSAGE_SIZE = 24
+WHATSAPP_MAX_MESSAGE_SIZE = 600
+WHATSAPP_MIN_DELAY = 0.20
+WHATSAPP_MAX_DELAY = 0.55
+WHATSAPP_CONNECT_RETRIES = 30
+WHATSAPP_CONNECT_RETRY_DELAY = 0.10
+WHATSAPP_SOCKET_TIMEOUT = 10
 WHATSAPP_LENGTH_PREFIX_SIZE = 4
 
 
 class TrafficError(RuntimeError):
-    """Raised when a generated traffic profile cannot complete."""
+    """Raised when a traffic profile cannot complete successfully."""
 
 
 def _family(address: str) -> int:
-    """Return IPv4/IPv6 socket family for a literal IP address."""
     try:
         socket.inet_pton(socket.AF_INET, address)
         return socket.AF_INET
@@ -106,21 +120,74 @@ def _family(address: str) -> int:
 
 
 def _address(family: int, host: str, port: int) -> tuple:
-    """Build a connect/send address for IPv4 or IPv6."""
     if family == socket.AF_INET:
         return host, port
     return host, port, 0, 0
 
 
 def _bind_address(family: int, port: int) -> tuple:
-    """Build a wildcard bind address for IPv4 or IPv6."""
     if family == socket.AF_INET:
         return "0.0.0.0", port
     return "::", port, 0, 0
 
 
+def _sleep_until(deadline: float) -> None:
+    remaining = deadline - time.monotonic()
+    if remaining > 0:
+        time.sleep(remaining)
+
+
+def _connect_with_retry(
+    family: int,
+    address: tuple,
+    retries: int,
+    delay: float,
+    timeout: float,
+    description: str,
+) -> socket.socket:
+    last_error: OSError | None = None
+
+    for _ in range(retries):
+        candidate = socket.socket(family, socket.SOCK_STREAM)
+        candidate.settimeout(timeout)
+        try:
+            candidate.connect(address)
+            return candidate
+        except OSError as exc:
+            last_error = exc
+            candidate.close()
+            time.sleep(delay)
+
+    raise TrafficError(f"{description} was not reachable") from last_error
+
+
+def _recv_exact(sock: socket.socket, size: int) -> bytes:
+    if size < 0:
+        raise TrafficError("Invalid receive size")
+
+    chunks = bytearray()
+    while len(chunks) < size:
+        chunk = sock.recv(size - len(chunks))
+        if not chunk:
+            raise TrafficError("Connection closed before complete payload")
+        chunks.extend(chunk)
+    return bytes(chunks)
+
+
+def _recv_until(sock: socket.socket, marker: bytes, maximum: int) -> bytes:
+    """Read a bounded TCP stream until marker is observed."""
+    buffer = bytearray()
+    while marker not in buffer:
+        if len(buffer) >= maximum:
+            raise TrafficError("TCP payload exceeded profile limit")
+        chunk = sock.recv(min(4096, maximum - len(buffer)))
+        if not chunk:
+            raise TrafficError("Connection closed before terminator")
+        buffer.extend(chunk)
+    return bytes(buffer)
+
+
 def command(traffic_type: str, role: str, target: str) -> list[str]:
-    """Build the subprocess command for the traffic profile."""
     if traffic_type not in TRAFFIC_TYPES:
         raise TrafficError(f"Unsupported traffic type: {traffic_type}")
     if role not in ROLES:
@@ -144,7 +211,6 @@ def command(traffic_type: str, role: str, target: str) -> list[str]:
 
 
 def run(traffic_type: str, role: str, target: str) -> None:
-    """Run one traffic profile as a child Python process."""
     args = command(traffic_type, role, target)
     try:
         result = subprocess.run(args, check=False)
@@ -162,33 +228,36 @@ def run(traffic_type: str, role: str, target: str) -> None:
 
 def _run_icmp(role: str, target: str) -> None:
     if role == "receiver":
-        # Receiver is passive for ICMP; keep the process alive while packets arrive.
-        time.sleep(ICMP_COUNT * ICMP_INTERVAL + 1)
+        # ICMP is handled by the kernel; the receiver simply remains alive long
+        # enough for the sender's request/reply exchange to finish.
+        time.sleep(ICMP_COUNT * ICMP_INTERVAL + ICMP_RECEIVER_GRACE)
         return
 
     if role == "peer":
         raise TrafficError("ICMP does not support the peer role")
 
     family = _family(target)
+    args = [
+        "ping",
+        "-q",
+        "-c",
+        str(ICMP_COUNT),
+        "-i",
+        str(ICMP_INTERVAL),
+        "-s",
+        str(ICMP_PAYLOAD_SIZE),
+        "-W",
+        "1",
+    ]
+
+    # A short ASCII pattern makes the payload identifiable if the inner packet
+    # is ever available to the analyzer, while packet timing remains the main
+    # distinguishing feature.
     if family == socket.AF_INET:
-        args = [
-            "ping",
-            "-c",
-            str(ICMP_COUNT),
-            "-i",
-            str(ICMP_INTERVAL),
-            target,
-        ]
+        args += ["-p", "49434d50", target]  # hex: ICMP
     else:
-        args = [
-            "ping",
-            "-6",
-            "-c",
-            str(ICMP_COUNT),
-            "-i",
-            str(ICMP_INTERVAL),
-            target,
-        ]
+        args = [args[0], "-6", *args[1:]]
+        args += ["-p", "49434d50", target]
 
     try:
         result = subprocess.run(args, check=False)
@@ -205,66 +274,96 @@ def _run_icmp(role: str, target: str) -> None:
 
 
 class _WebHandler(BaseHTTPRequestHandler):
-    """HTTP handler used only to generate controlled web traffic."""
-
     request_counter: dict[str, int] | None = None
     request_lock: threading.Lock | None = None
     request_event: threading.Event | None = None
 
-    def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
-        body_length = random.randint(WEB_MIN_PAYLOAD, WEB_MAX_PAYLOAD)
-        body = b"SIH_" + b"A" * (body_length - 4)
+    def do_GET(self) -> None:  # noqa: N802 - stdlib API
+        path = self.path.split("?", 1)[0]
+        if path.endswith(".html"):
+            minimum, maximum = 120_000, 300_000
+            prefix = b"<!doctype html>\n<html><body>ESPect web page "
+        elif path.endswith(".json"):
+            minimum, maximum = 80_000, 180_000
+            prefix = b'{"project":"ESPect","traffic":"web","data":"'
+        else:
+            minimum, maximum = WEB_MIN_PAYLOAD, WEB_MAX_PAYLOAD
+            prefix = b"ESPect WEB response "
+
+        body_length = random.randint(minimum, maximum)
+        prefix = prefix[:body_length]
+        body = prefix + _web_payload(body_length - len(prefix), path)
 
         self.send_response(200)
-        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Type", "text/html" if path.endswith(".html") else "application/octet-stream")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
 
-        if (
-            self.request_counter is not None
-            and self.request_lock is not None
-            and self.request_event is not None
-        ):
+        if self.request_counter is not None and self.request_lock is not None:
             with self.request_lock:
                 self.request_counter["count"] += 1
-                if self.request_counter["count"] >= WEB_REQUESTS:
+                if (
+                    self.request_event is not None
+                    and self.request_counter["count"] >= WEB_REQUESTS
+                ):
                     self.request_event.set()
 
     def log_message(self, format: str, *args: object) -> None:
         return
 
 
-class _IPv6HTTPServer(ThreadingHTTPServer):
+class _ReusableHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+
+
+class _IPv6HTTPServer(_ReusableHTTPServer):
     address_family = socket.AF_INET6
+
+
+def _web_payload(size: int, path: str) -> bytes:
+    if size <= 0:
+        return b""
+
+    # A blend of structured text and non-repeating bytes avoids making every
+    # application profile look like a constant-filled synthetic stream.
+    seed = f"path={path};project=ESPect;".encode()
+    chunks = bytearray(seed)
+    while len(chunks) < size:
+        if len(chunks) % 7 == 0:
+            chunks.extend(random.randbytes(min(512, size - len(chunks))))
+        else:
+            chunks.extend(
+                b"network-security ipsec vpn analysis experiment packet-flow "
+            )
+    return bytes(chunks[:size])
 
 
 def _create_http_server(family: int) -> ThreadingHTTPServer:
     server_class = (
-        ThreadingHTTPServer if family == socket.AF_INET else _IPv6HTTPServer
+        _ReusableHTTPServer if family == socket.AF_INET else _IPv6HTTPServer
     )
-    return server_class(_bind_address(family, WEB_PORT), _WebHandler)
+    server = server_class(_bind_address(family, WEB_PORT), _WebHandler)
+    return server
 
 
 def _web_receiver(target: str) -> None:
-    """Serve exactly WEB_REQUESTS requests, avoiding premature shutdown."""
     family = _family(target)
     server = _create_http_server(family)
 
     counter = {"count": 0}
-    request_lock = threading.Lock()
-    complete_event = threading.Event()
-
+    lock = threading.Lock()
+    complete = threading.Event()
     _WebHandler.request_counter = counter
-    _WebHandler.request_lock = request_lock
-    _WebHandler.request_event = complete_event
+    _WebHandler.request_lock = lock
+    _WebHandler.request_event = complete
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
 
     try:
-        if not complete_event.wait(timeout=WEB_RECEIVER_TIMEOUT):
+        if not complete.wait(timeout=WEB_RECEIVER_TIMEOUT):
             raise TrafficError(
                 f"Web sender completed only {counter['count']}/{WEB_REQUESTS} requests"
             )
@@ -280,42 +379,92 @@ def _web_receiver(target: str) -> None:
 def _web_sender(target: str) -> None:
     family = _family(target)
     host = f"[{target}]" if family == socket.AF_INET6 else target
-    url = f"http://{host}:{WEB_PORT}/"
+    base = f"http://{host}:{WEB_PORT}"
 
-    last_error: OSError | None = None
+    paths = [
+        "/index.html",
+        "/assets/main.css",
+        "/api/status.json",
+        "/dashboard.html",
+        "/assets/app.js",
+        "/api/metrics.json",
+        "/report.html",
+        "/assets/data.bin",
+    ]
 
-    # Wait for the receiver to become ready.
-    for _ in range(WEB_CONNECT_RETRIES):
+    for number in range(WEB_REQUESTS):
+        if number > 0:
+            time.sleep(random.uniform(WEB_MIN_DELAY, WEB_MAX_DELAY))
+
+        url = base + paths[number % len(paths)]
         try:
             with urlopen(url, timeout=WEB_REQUEST_TIMEOUT) as response:
                 if response.status != 200:
                     raise TrafficError(
                         f"HTTP server returned status {response.status}"
                     )
-                response.read()
-            last_error = None
-            break
-        except OSError as exc:
-            last_error = exc
-            time.sleep(WEB_CONNECT_RETRY_DELAY)
-    else:
-        raise TrafficError("Web receiver was not reachable") from last_error
+                while response.read(64 * 1024):
+                    pass
+        except OSError:
+            if number != 0:
+                raise TrafficError("Web traffic failed")
 
-    # Remaining requests simulate page navigation/reading time.
-    for _ in range(WEB_REQUESTS - 1):
-        time.sleep(random.uniform(WEB_MIN_DELAY, WEB_MAX_DELAY))
-        try:
-            with urlopen(url, timeout=WEB_REQUEST_TIMEOUT) as response:
-                if response.status != 200:
-                    raise TrafficError("HTTP request failed")
-                response.read()
-        except OSError as exc:
-            raise TrafficError("Web traffic failed") from exc
+            # The server may need a little longer to start. Retry the first
+            # request independently, without changing the traffic pattern.
+            last_error: OSError | None = None
+            for _ in range(WEB_CONNECT_RETRIES):
+                try:
+                    with urlopen(url, timeout=WEB_REQUEST_TIMEOUT) as response:
+                        if response.status != 200:
+                            raise TrafficError(
+                                f"HTTP server returned status {response.status}"
+                            )
+                        while response.read(64 * 1024):
+                            pass
+                    last_error = None
+                    break
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(WEB_CONNECT_RETRY_DELAY)
+            if last_error is not None:
+                raise TrafficError("Web receiver was not reachable") from last_error
 
 
 # ---------------------------------------------------------------------------
 # EMAIL
 # ---------------------------------------------------------------------------
+
+
+def _email_body(number: int) -> bytes:
+    subject = f"ESPect controlled email {number}".encode()
+    words = (
+        b"IPsec experiment security telemetry VPN packet analysis "
+        b"configuration performance traffic classifier. "
+    )
+    target = random.randint(EMAIL_MIN_BODY, EMAIL_MAX_BODY)
+    body = bytearray()
+    while len(body) < target:
+        if len(body) % 1024 < 128:
+            body.extend(random.randbytes(min(256, target - len(body))))
+        else:
+            body.extend(words[: min(len(words), target - len(body))])
+
+    message = (
+        b"Date: Thu, 24 Sep 2026 11:00:00 +0530\r\n"
+        b"From: vm@sih.local\r\n"
+        b"To: vm@sih.local\r\n"
+        b"Message-ID: <"
+        + str(number).encode()
+        + b"@espest.local>\r\n"
+        b"Subject: "
+        + subject
+        + b"\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n"
+        b"\r\n"
+        + bytes(body)
+        + b"\r\n.\r\n"
+    )
+    return message
 
 
 def _email_receiver(target: str) -> None:
@@ -324,33 +473,34 @@ def _email_receiver(target: str) -> None:
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.settimeout(EMAIL_SOCKET_TIMEOUT)
     server.bind(_bind_address(family, EMAIL_PORT))
-    server.listen(1)
+    server.listen(2)
 
     try:
-        connection, _ = server.accept()
-        with connection:
-            connection.settimeout(EMAIL_SOCKET_TIMEOUT)
-            connection.sendall(b"220 SIH SMTP\r\n")
+        for _ in range(EMAIL_MESSAGES):
+            connection, _ = server.accept()
+            with connection:
+                connection.settimeout(EMAIL_SOCKET_TIMEOUT)
+                connection.sendall(b"220 ESPect SMTP\r\n")
 
-            expected = [b"HELO", b"MAIL FROM:", b"RCPT TO:", b"DATA"]
-            for expected_command in expected:
+                for expected in (b"HELO", b"MAIL FROM:", b"RCPT TO:"):
+                    data = connection.recv(4096)
+                    if expected not in data.upper():
+                        raise TrafficError("Invalid SMTP command sequence")
+                    connection.sendall(b"250 OK\r\n")
+
                 data = connection.recv(4096)
-                if expected_command not in data.upper():
-                    raise TrafficError("Invalid email sequence")
+                if b"DATA" not in data.upper():
+                    raise TrafficError("SMTP DATA command missing")
+                connection.sendall(b"354 End data with <CRLF>.<CRLF>\r\n")
 
-                if expected_command == b"DATA":
-                    connection.sendall(b"354 End data\r\n")
-                    data = connection.recv(65_536)
-                    if not data:
-                        raise TrafficError("Email body missing")
-                    connection.sendall(b"250 OK\r\n")
-                else:
-                    connection.sendall(b"250 OK\r\n")
+                payload = _recv_until(connection, b"\r\n.\r\n", 64 * 1024)
+                if len(payload) <= len(b"\r\n.\r\n"):
+                    raise TrafficError("Email body missing")
+                connection.sendall(b"250 2.0.0 OK\r\n")
 
-            data = connection.recv(4096)
-            if data:
-                connection.sendall(b"221 Bye\r\n")
-
+                quit_data = connection.recv(4096)
+                if quit_data and b"QUIT" in quit_data.upper():
+                    connection.sendall(b"221 2.0.0 Bye\r\n")
     except socket.timeout as exc:
         raise TrafficError("Email sender did not connect or complete") from exc
     except OSError as exc:
@@ -361,61 +511,56 @@ def _email_receiver(target: str) -> None:
 
 def _email_sender(target: str) -> None:
     family = _family(target)
-    connection: socket.socket | None = None
-    last_error: OSError | None = None
 
-    for _ in range(EMAIL_CONNECT_RETRIES):
-        candidate = socket.socket(family, socket.SOCK_STREAM)
-        candidate.settimeout(EMAIL_SOCKET_TIMEOUT)
-        try:
-            candidate.connect(_address(family, target, EMAIL_PORT))
-            connection = candidate
-            last_error = None
-            break
-        except OSError as exc:
-            last_error = exc
-            candidate.close()
-            time.sleep(EMAIL_CONNECT_RETRY_DELAY)
+    for number in range(EMAIL_MESSAGES):
+        if number:
+            time.sleep(random.uniform(*EMAIL_INTER_MESSAGE_DELAY))
 
-    if connection is None:
-        raise TrafficError("Email receiver was not reachable") from last_error
-
-    try:
-        if not connection.recv(4096):
-            raise TrafficError("SMTP greeting missing")
-
-        commands = [
-            b"HELO sih\r\n",
-            b"MAIL FROM:<vm@sih.local>\r\n",
-            b"RCPT TO:<vm@sih.local>\r\n",
-            b"DATA\r\n",
-        ]
-
-        for data in commands:
-            connection.sendall(data)
-            response = connection.recv(4096)
-            if not response:
-                raise TrafficError("SMTP response missing")
-
-        body_length = random.randint(EMAIL_MIN_BODY, EMAIL_MAX_BODY)
-        email_body = (
-            b"Subject: SIH IPsec experiment\r\n"
-            b"\r\n"
-            b"Controlled email traffic.\r\n"
-            + b"E" * body_length
-            + b"\r\n.\r\n"
+        connection = _connect_with_retry(
+            family,
+            _address(family, target, EMAIL_PORT),
+            EMAIL_CONNECT_RETRIES,
+            EMAIL_CONNECT_RETRY_DELAY,
+            EMAIL_SOCKET_TIMEOUT,
+            "Email receiver",
         )
-        connection.sendall(email_body)
 
-        if not connection.recv(4096):
-            raise TrafficError("Email DATA response missing")
+        try:
+            connection.sendall(b"HELO espest\r\n")
+            if not connection.recv(4096):
+                raise TrafficError("SMTP HELO response missing")
 
-        connection.sendall(b"QUIT\r\n")
-        connection.recv(4096)
-    except OSError as exc:
-        raise TrafficError("Email traffic failed") from exc
-    finally:
-        connection.close()
+            connection.sendall(b"MAIL FROM:<vm@sih.local>\r\n")
+            if not connection.recv(4096):
+                raise TrafficError("SMTP MAIL FROM response missing")
+
+            connection.sendall(b"RCPT TO:<vm@sih.local>\r\n")
+            if not connection.recv(4096):
+                raise TrafficError("SMTP RCPT TO response missing")
+
+            connection.sendall(b"DATA\r\n")
+            if not connection.recv(4096):
+                raise TrafficError("SMTP DATA response missing")
+
+            message = _email_body(number)
+            # Deliberately send this in a few chunks: email is a bursty TCP
+            # transfer, not a single fixed-size datagram-like pattern.
+            split = max(1, len(message) // 3)
+            connection.sendall(message[:split])
+            time.sleep(0.015)
+            connection.sendall(message[split : 2 * split])
+            time.sleep(0.015)
+            connection.sendall(message[2 * split :])
+
+            if not connection.recv(4096):
+                raise TrafficError("SMTP DATA acknowledgement missing")
+
+            connection.sendall(b"QUIT\r\n")
+            connection.recv(4096)
+        except OSError as exc:
+            raise TrafficError("Email traffic failed") from exc
+        finally:
+            connection.close()
 
 
 # ---------------------------------------------------------------------------
@@ -426,12 +571,13 @@ def _email_sender(target: str) -> None:
 def _video_receiver(target: str) -> None:
     family = _family(target)
     sock = socket.socket(family, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
     sock.bind(_bind_address(family, VIDEO_PORT))
-    sock.settimeout(1)
+    sock.settimeout(0.5)
 
-    received = 0
     deadline = time.monotonic() + VIDEO_DURATION + VIDEO_RECEIVER_GRACE
+    received = 0
 
     try:
         while time.monotonic() < deadline:
@@ -453,27 +599,43 @@ def _video_sender(target: str) -> None:
     sock = socket.socket(family, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4 * 1024 * 1024)
     address = _address(family, target, VIDEO_PORT)
-    deadline = time.monotonic() + VIDEO_DURATION
-    interval = 1.0 / VIDEO_FPS
-    frame_count = 0
 
     try:
-        while time.monotonic() < deadline:
-            frame_count += 1
-            is_i_frame = frame_count % VIDEO_I_FRAME_EVERY == 0
-            packet_count_range = (
+        # Allow the peer's UDP receiver process to bind before the first burst.
+        time.sleep(VIDEO_STARTUP_DELAY)
+        start = time.monotonic()
+        next_frame = start
+        frame_number = 0
+
+        while True:
+            now = time.monotonic()
+            if now >= start + VIDEO_DURATION:
+                break
+
+            frame_number += 1
+            is_i_frame = frame_number % VIDEO_I_FRAME_EVERY == 0
+            count_low, count_high = (
                 VIDEO_I_FRAME_PACKETS if is_i_frame else VIDEO_P_FRAME_PACKETS
             )
-            packets_in_frame = random.randint(*packet_count_range)
+            packets = random.randint(count_low, count_high)
 
-            for _ in range(packets_in_frame):
+            for packet_number in range(packets):
                 packet_size = random.randint(
                     VIDEO_MIN_PACKET_SIZE, VIDEO_MAX_PACKET_SIZE
                 )
-                packet = b"VIDEO" + b"X" * (packet_size - 5)
-                sock.sendto(packet, address)
+                header = (
+                    b"VID"
+                    + bytes((1 if is_i_frame else 0,))
+                    + frame_number.to_bytes(4, "big", signed=False)
+                    + packet_number.to_bytes(2, "big", signed=False)
+                    + b"X"
+                )
+                body_size = packet_size - len(header)
+                body = random.randbytes(body_size)
+                sock.sendto(header + body, address)
 
-            time.sleep(interval)
+            next_frame += 1.0 / VIDEO_FPS
+            _sleep_until(next_frame)
     except OSError as exc:
         raise TrafficError("Video traffic failed") from exc
     finally:
@@ -492,6 +654,7 @@ def _voip_receiver(
 ) -> None:
     family = _family(target)
     sock = socket.socket(family, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2 * 1024 * 1024)
     sock.bind(_bind_address(family, VOIP_PORT))
     sock.settimeout(0.2)
@@ -508,6 +671,20 @@ def _voip_receiver(
         sock.close()
 
 
+def _voip_packet(sequence: int, timestamp: int) -> bytes:
+    # 12-byte RTP-like header, keeping the total datagram size at exactly
+    # VOIP_PACKET_SIZE bytes.
+    payload_size = VOIP_PACKET_SIZE - 12
+    header = (
+        bytes((0x80, 0x11))
+        + sequence.to_bytes(2, "big", signed=False)
+        + timestamp.to_bytes(4, "big", signed=False)
+        + (0x45535045).to_bytes(4, "big", signed=False)  # SSRC marker
+    )
+    payload = (b"VOIP" + random.randbytes(payload_size - 4))
+    return header + payload
+
+
 def _voip_peer(target: str) -> None:
     family = _family(target)
     stop_event = threading.Event()
@@ -519,44 +696,70 @@ def _voip_peer(target: str) -> None:
         daemon=True,
     )
     receiver.start()
-    time.sleep(0.1)
 
     sock = socket.socket(family, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 2 * 1024 * 1024)
     address = _address(family, target, VOIP_PORT)
-    packet = b"VOIP" + b"X" * (VOIP_PACKET_SIZE - 4)
-    deadline = time.monotonic() + VOIP_DURATION
 
     try:
-        while time.monotonic() < deadline:
-            sock.sendto(packet, address)
-            time.sleep(VOIP_INTERVAL)
+        time.sleep(VOIP_STARTUP_DELAY)
+        start = time.monotonic()
+        next_packet = start
+        sequence = random.randint(0, 65_535)
+        timestamp = random.randint(0, 2**31 - 1)
+        deadline = start + VOIP_DURATION
+
+        while next_packet < deadline:
+            _sleep_until(next_packet)
+            if time.monotonic() >= deadline:
+                break
+
+            sock.sendto(_voip_packet(sequence, timestamp), address)
+            sequence = (sequence + 1) & 0xFFFF
+            timestamp = (timestamp + 160) & 0xFFFFFFFF
+            next_packet += VOIP_INTERVAL + random.uniform(-VOIP_JITTER, VOIP_JITTER)
+
     except OSError as exc:
         raise TrafficError("VoIP traffic failed") from exc
     finally:
         sock.close()
         stop_event.set()
+        receiver.join(timeout=2)
 
-    receiver.join(timeout=2)
-
-    # This local receive check is useful when two peer processes are exchanging traffic.
     if counter["received"] == 0:
         raise TrafficError("No VoIP traffic was received")
 
 
 # ---------------------------------------------------------------------------
-# WHATSAPP-LIKE CONTROLLED MESSAGING
+# WHATSAPP-LIKE MESSAGING
 # ---------------------------------------------------------------------------
 
 
-def _recv_exact(sock: socket.socket, size: int) -> bytes:
-    """Read exactly size bytes from a TCP stream."""
-    chunks = bytearray()
-    while len(chunks) < size:
-        chunk = sock.recv(size - len(chunks))
-        if not chunk:
-            raise TrafficError("Connection closed before complete message")
-        chunks.extend(chunk)
-    return bytes(chunks)
+def _whatsapp_message(number: int) -> bytes:
+    target_size = random.randint(
+        WHATSAPP_MIN_MESSAGE_SIZE,
+        WHATSAPP_MAX_MESSAGE_SIZE,
+    )
+    seed = (
+        f"message-{number} ESPect IPsec traffic experiment "
+        "status update "
+    ).encode()
+    message = bytearray(seed)
+    while len(message) < target_size:
+        message.extend(
+            random.choice(
+                [
+                    b"hello ",
+                    b"test ",
+                    b"vpn ",
+                    b"packet ",
+                    b"analysis ",
+                    b"secure ",
+                    b"ok ",
+                ]
+            )
+        )
+    return bytes(message[:target_size])
 
 
 def _whatsapp_receiver(target: str) -> None:
@@ -574,18 +777,19 @@ def _whatsapp_receiver(target: str) -> None:
             for _ in range(WHATSAPP_MESSAGES):
                 raw_length = _recv_exact(connection, WHATSAPP_LENGTH_PREFIX_SIZE)
                 message_length = int.from_bytes(raw_length, "big")
-
                 if not (
                     WHATSAPP_MIN_MESSAGE_SIZE
                     <= message_length
-                    <= WHATSAPP_MAX_MESSAGE_SIZE + 64
+                    <= WHATSAPP_MAX_MESSAGE_SIZE
                 ):
                     raise TrafficError("Invalid messaging payload length")
 
                 _recv_exact(connection, message_length)
                 connection.sendall(b"ACK")
     except socket.timeout as exc:
-        raise TrafficError("Messaging peer did not connect or complete") from exc
+        raise TrafficError(
+            "Messaging peer did not connect or complete"
+        ) from exc
     except OSError as exc:
         raise TrafficError("Messaging receiver failed") from exc
     finally:
@@ -594,41 +798,26 @@ def _whatsapp_receiver(target: str) -> None:
 
 def _whatsapp_sender(target: str) -> None:
     family = _family(target)
-    connection: socket.socket | None = None
-    last_error: OSError | None = None
-
-    for _ in range(WHATSAPP_CONNECT_RETRIES):
-        candidate = socket.socket(family, socket.SOCK_STREAM)
-        candidate.settimeout(WHATSAPP_SOCKET_TIMEOUT)
-        try:
-            candidate.connect(_address(family, target, WHATSAPP_PORT))
-            candidate.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            connection = candidate
-            last_error = None
-            break
-        except OSError as exc:
-            last_error = exc
-            candidate.close()
-            time.sleep(WHATSAPP_CONNECT_RETRY_DELAY)
-
-    if connection is None:
-        raise TrafficError("Messaging peer was not reachable") from last_error
+    connection = _connect_with_retry(
+        family,
+        _address(family, target, WHATSAPP_PORT),
+        WHATSAPP_CONNECT_RETRIES,
+        WHATSAPP_CONNECT_RETRY_DELAY,
+        WHATSAPP_SOCKET_TIMEOUT,
+        "Messaging receiver",
+    )
 
     try:
+        connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        connection.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+
         for number in range(WHATSAPP_MESSAGES):
-            # Random typing/read delay to avoid a perfectly periodic TCP pattern.
             time.sleep(random.uniform(WHATSAPP_MIN_DELAY, WHATSAPP_MAX_DELAY))
-
-            message_length = random.randint(
-                WHATSAPP_MIN_MESSAGE_SIZE,
-                WHATSAPP_MAX_MESSAGE_SIZE,
-            )
-            message = f"msg-{number}-".encode() + b"W" * message_length
-
+            message = _whatsapp_message(number)
             connection.sendall(len(message).to_bytes(4, "big"))
             connection.sendall(message)
 
-            if connection.recv(4096) != b"ACK":
+            if connection.recv(16) != b"ACK":
                 raise TrafficError("Messaging acknowledgement missing")
     except OSError as exc:
         raise TrafficError("Messaging traffic failed") from exc
@@ -685,7 +874,9 @@ def _run_profile(traffic_type: str, role: str, target: str) -> None:
         elif role == "receiver":
             _whatsapp_receiver(target)
         else:
-            raise TrafficError("WhatsApp traffic supports sender/receiver roles only")
+            raise TrafficError(
+                "WhatsApp traffic supports sender/receiver roles only"
+            )
         return
 
     raise TrafficError(f"Unsupported traffic type: {traffic_type}")
@@ -693,7 +884,7 @@ def _run_profile(traffic_type: str, role: str, target: str) -> None:
 
 def _main() -> int:
     parser = argparse.ArgumentParser(
-        description="Generate controlled IPv4/IPv6 traffic profiles for IPsec/VPN analysis."
+        description="Generate controlled IPv4/IPv6 traffic profiles for ESPect."
     )
     parser.add_argument(
         "--run",
@@ -714,7 +905,6 @@ def _main() -> int:
     )
 
     args = parser.parse_args()
-
     try:
         _run_profile(args.run, args.role, args.target)
     except TrafficError as exc:
