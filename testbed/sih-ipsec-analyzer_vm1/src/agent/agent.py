@@ -198,7 +198,7 @@ class Agent:
 
         if mode == "random":
             effective = self._randomize_traffic(effective)
-        elif mode not in {"configured", "manual", "fixed"}:
+        elif mode not in {"configured", "manual", "fixed", "targeted"}:
             raise AgentError(
                 f"Unsupported capture mode: {mode}. Use random or configured."
             )
