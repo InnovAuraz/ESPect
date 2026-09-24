@@ -1,4 +1,6 @@
 import argparse
+import json
+import os
 import time
 from pathlib import Path
 
@@ -15,10 +17,27 @@ VM2 = "192.168.160.129"
 IPV6_VM1 = "fd00:160::128"
 IPV6_VM2 = "fd00:160::129"
 
-CAPTURE_INTERFACE = "eth1"
-
 ROOT = Path(__file__).resolve().parents[1]
+CAPTURE_INTERFACE = os.environ.get("ESPECT_CAPTURE_INTERFACE", "eth1")
+STATUS_FILE = ROOT / "debug" / "logs" / "capture_status.json"
 DEFAULT_OUTPUT_DIR = ROOT / "captures"
+
+
+def write_status(**values: object) -> None:
+    STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict = {}
+    if STATUS_FILE.is_file():
+        try:
+            payload = json.loads(STATUS_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            payload = {}
+    payload.update(values)
+    payload.setdefault("started_at", time.time())
+    payload["updated_at"] = time.time()
+    try:
+        STATUS_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def load_configuration(path: Path) -> dict:
@@ -125,7 +144,33 @@ def run_capture(
     capture_started = False
     ipsec_started = False
 
+    write_status(
+        status="starting",
+        stage="starting",
+        duration=duration,
+        traffic_type=configuration["traffic_type"],
+        ipsec_mode=configuration["ipsec_mode"],
+        ip_version=configuration["ip_version"],
+        encryption=configuration["encryption"],
+        integrity=configuration["integrity"],
+        dh_group=configuration["dh_group"],
+        pfs=configuration["pfs"],
+        output=str(output),
+        capture_interface=CAPTURE_INTERFACE,
+        capture_filter=capture_filter,
+    )
+
     try:
+        # A previous run may have left an SA behind after an interrupted
+        # browser session. Clear it before loading the next experiment.
+        write_status(stage="cleanup", status="running")
+        print("[0/6] Clearing any previous IPsec session...")
+        try:
+            controller.terminate_ipsec()
+        except Exception:
+            pass
+
+        write_status(stage="configuring", status="running")
         print("[1/6] Configuring agents...")
 
         controller.configure(
@@ -133,6 +178,7 @@ def run_capture(
             configuration,
         )
 
+        write_status(stage="ipsec_configuring", status="running")
         print("[2/6] Applying IPsec configuration...")
 
         controller.apply_ipsec(
@@ -140,6 +186,7 @@ def run_capture(
         )
 
         # Capture MUST begin before IKE negotiation.
+        write_status(stage="capture_starting", status="running")
         print("[3/6] Starting tcpdump capture...")
 
         controller.start_capture(
@@ -149,11 +196,13 @@ def run_capture(
         )
         capture_started = True
 
+        write_status(stage="ipsec_starting", status="running")
         print("[4/6] Initiating IPsec...")
 
         controller.initiate_ipsec()
         ipsec_started = True
 
+        write_status(stage="ipsec_verifying", status="running")
         print("[5/6] Checking IPsec status...")
 
         status_a = controller.ipsec_status(VM1)
@@ -171,6 +220,7 @@ def run_capture(
 
         print("IPsec SA established on both agents.")
 
+        write_status(stage="traffic_starting", status="running")
         print(
             f"Starting {configuration['traffic_type']} "
             f"traffic..."
@@ -183,6 +233,7 @@ def run_capture(
             ip_version=ip_version,
         )
 
+        write_status(stage="capturing", status="running")
         print(
             f"Capturing for {duration:g} seconds..."
         )
@@ -195,11 +246,17 @@ def run_capture(
             if remaining <= 0:
                 break
 
+            write_status(stage="capturing", status="running")
             time.sleep(
                 min(0.25, remaining)
             )
 
-        #controller.wait_for_traffic()
+        controller.wait_for_traffic()
+        write_status(stage="traffic_completed", status="running")
+
+    except Exception as exc:
+        write_status(stage="failed", status="failed", error=str(exc))
+        raise
 
     finally:
         print("[6/6] Stopping capture...")
@@ -232,9 +289,26 @@ def run_capture(
     )
 
     if not valid:
+        write_status(stage="validation_failed", status="failed", output=str(output))
         raise RuntimeError(
             "Generated PCAP failed validation."
         )
+
+    packet_count = None
+    try:
+        from scapy.all import rdpcap
+        packet_count = len(rdpcap(str(output)))
+    except Exception:
+        packet_count = None
+
+    write_status(
+        stage="completed",
+        status="completed",
+        output=str(output),
+        output_size=output.stat().st_size if output.exists() else 0,
+        packet_count=packet_count,
+        validation="PASSED",
+    )
 
     print()
     print("================================")

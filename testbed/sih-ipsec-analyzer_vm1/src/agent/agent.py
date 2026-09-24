@@ -1,19 +1,33 @@
+import base64
 import json
+import os
+import random
+import signal
 import socket
 import subprocess
-import base64
 import sys
-import yaml
-import random
 from pathlib import Path
+
+import yaml
 
 from .ipsec import apply, initiate, status, terminate
 from src.capture import Capture
+from src.experiment.validator import validate as validate_configuration
 from src.traffic import command
 
 
 class AgentError(RuntimeError):
     pass
+
+
+TRAFFIC_TYPES = {
+    "voip",
+    "whatsapp",
+    "email",
+    "web",
+    "icmp",
+    "video",
+}
 
 
 class Agent:
@@ -25,9 +39,15 @@ class Agent:
         self.capture_file = None
         self.experiment_process = None
         self.experiment_log = None
+        self.experiment_config_file = None
 
     def configure(self, configuration: dict) -> None:
-        self.configuration = configuration
+        errors = validate_configuration(configuration)
+        if errors:
+            raise AgentError(
+                "Invalid configuration: " + "; ".join(errors)
+            )
+        self.configuration = dict(configuration)
 
     def apply_ipsec(self, config_text: str) -> None:
         if self.configuration is None:
@@ -45,6 +65,7 @@ class Agent:
     def start_traffic(self, target: str, role: str) -> None:
         if self.configuration is None:
             raise AgentError("Agent is not configured")
+
         if self.process is not None:
             if self.process.poll() is None:
                 self.process.terminate()
@@ -52,6 +73,7 @@ class Agent:
             self.process = None
 
         traffic_type = self.configuration["traffic_type"]
+
         try:
             args = command(traffic_type, role, target)
         except Exception as exc:
@@ -60,17 +82,28 @@ class Agent:
         try:
             self.process = subprocess.Popen(args)
         except OSError as exc:
-            raise AgentError(f"Failed to start {traffic_type} traffic") from exc
+            raise AgentError(
+                f"Failed to start {traffic_type} traffic"
+            ) from exc
 
     def wait(self) -> None:
         if self.process is None:
             raise AgentError("Traffic is not running")
+
         result = self.process.wait()
         self.process = None
-        if result != 0:
-            raise AgentError(f"Traffic failed with exit code {result}")
 
-    def start_capture(self, interface: str, filename: str, capture_filter: str | None = None) -> None:
+        if result != 0:
+            raise AgentError(
+                f"Traffic failed with exit code {result}"
+            )
+
+    def start_capture(
+        self,
+        interface: str,
+        filename: str,
+        capture_filter: str | None = None,
+    ) -> None:
         if self.capture is not None:
             try:
                 self.stop_capture()
@@ -114,57 +147,88 @@ class Agent:
             "eof": len(data) < size,
         }
 
-    def start_experiment(self, duration: float, mode: str = "random", traffic_type: str = "voip") -> None:
+    @staticmethod
+    def _load_base_configuration() -> dict:
+        path = Path("config") / "configuration.yaml"
+        if not path.is_file():
+            raise AgentError(f"Configuration file not found: {path}")
+
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise AgentError(f"Failed to read {path}: {exc}") from exc
+
+        if not isinstance(data, dict):
+            raise AgentError("Configuration YAML must contain a mapping")
+
+        configuration = data.get("configuration", data)
+        if not isinstance(configuration, dict):
+            raise AgentError("Configuration must be a mapping")
+
+        return dict(configuration)
+
+    @staticmethod
+    def _randomize_traffic(configuration: dict) -> dict:
+        configuration = dict(configuration)
+        configuration["traffic_type"] = random.choice(sorted(TRAFFIC_TYPES))
+        return configuration
+
+    def start_experiment(
+        self,
+        duration: float,
+        mode: str = "configured",
+        traffic_type: str | None = None,
+        configuration: dict | None = None,
+    ) -> None:
+        if duration <= 0:
+            raise AgentError("Duration must be greater than zero")
+
         if self.experiment_process is not None and self.experiment_process.poll() is None:
             raise AgentError("A packet capture workflow is already running")
 
-        # 1. Provide a safe default skeleton in case the file doesn't exist
-        config_data = {
-            "configuration": {
-                "ipsec_mode": "transport", 
-                "encryption": "aes128-gcm16", 
-                "integrity": "none-aead", 
-                "dh_group": "modp2048", 
-                "pfs": True, 
-                "ip_version": "ipv4", 
-                "traffic_type": "voip"
-            }
-        }
+        effective = self._load_base_configuration()
 
-        # 2. Try to read existing config
-        config_path = Path("config") / "configuration.yaml"
-        if config_path.exists():
-            try:
-                with config_path.open("r", encoding="utf-8") as f:
-                    loaded = yaml.safe_load(f)
-                    if loaded and "configuration" in loaded:
-                        config_data = loaded
-            except Exception:
-                pass
-                
-        # 3. Inject the requested mode/traffic
+        if configuration:
+            effective.update(configuration)
+
+        if traffic_type is not None:
+            if traffic_type not in TRAFFIC_TYPES:
+                raise AgentError(f"Unsupported traffic type: {traffic_type}")
+            effective["traffic_type"] = traffic_type
+
         if mode == "random":
-            options = ["voip", "icmp", "web", "email", "video", "whatsapp"]
-            config_data["configuration"]["traffic_type"] = random.choice(options)
-        else:
-            config_data["configuration"]["traffic_type"] = traffic_type
-            
-        # 4. Force write the updated config back to disk safely
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        with config_path.open("w", encoding="utf-8") as f:
-            yaml.safe_dump(config_data, f, default_flow_style=False)
+            effective = self._randomize_traffic(effective)
+        elif mode not in {"configured", "manual", "fixed"}:
+            raise AgentError(
+                f"Unsupported capture mode: {mode}. Use random or configured."
+            )
+
+        errors = validate_configuration(effective)
+        if errors:
+            raise AgentError(
+                "Invalid experiment configuration: " + "; ".join(errors)
+            )
+
+        runtime_config = Path("captures") / "runtime_configuration.yaml"
+        runtime_config.parent.mkdir(parents=True, exist_ok=True)
+        Path("debug/logs/capture_status.json").unlink(missing_ok=True)
+        runtime_config.write_text(
+            yaml.safe_dump(effective, sort_keys=False),
+            encoding="utf-8",
+        )
+        self.experiment_config_file = runtime_config
 
         output = Path("captures") / "live_capture.pcap"
         output.parent.mkdir(parents=True, exist_ok=True)
         log_path = Path("debug") / "logs" / "packet_capture.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         self.experiment_log = log_path.open("ab")
-        
+
         self.experiment_process = subprocess.Popen(
             [
                 sys.executable,
                 "scripts/packet_capture.py",
-                "config/configuration.yaml",
+                str(runtime_config),
                 str(duration),
                 "--output",
                 str(output),
@@ -182,7 +246,7 @@ class Agent:
                 stage = json.loads(stage_file.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 stage = {}
-                
+
         if self.experiment_process is None:
             return {"status": "idle", "returncode": None, **stage}
 
@@ -203,8 +267,20 @@ class Agent:
     def stop_experiment(self) -> None:
         if self.experiment_process is None or self.experiment_process.poll() is not None:
             return
-        self.experiment_process.terminate()
-        self.experiment_process.wait(timeout=10)
+
+        process = self.experiment_process
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=5)
+        except ProcessLookupError:
+            pass
+
+        if self.experiment_log is not None:
+            self.experiment_log.close()
+            self.experiment_log = None
 
     def read_file_chunk(self, filename: str, offset: int, size: int) -> dict:
         safe_name = Path(filename).name
@@ -230,10 +306,12 @@ _agent = Agent()
 
 def serve(host: str = "0.0.0.0", port: int = 9000) -> None:
     _agent.host = host
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((host, port))
         server.listen()
+
         while True:
             connection, _ = server.accept()
             with connection:
@@ -241,23 +319,22 @@ def serve(host: str = "0.0.0.0", port: int = 9000) -> None:
                     data = connection.recv(65536)
                     if not data:
                         continue
+
                     request = json.loads(data.decode())
                     response = _handle(request)
                 except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                     response = {"ok": False, "error": f"Invalid request: {exc}"}
-                
-                # FIXED: This safely handles BrokenPipeError so the agent never crashes again
+
                 try:
                     connection.sendall(json.dumps(response).encode())
-                except BrokenPipeError:
+                except (BrokenPipeError, ConnectionResetError):
                     pass
-                except Exception as exc:
-                    print(f"Socket send error: {exc}")
 
 
 def _handle(request: dict) -> dict:
     try:
         action = request["action"]
+
         if action == "configure":
             _agent.configure(request["configuration"])
         elif action == "apply_ipsec":
@@ -273,28 +350,45 @@ def _handle(request: dict) -> dict:
         elif action == "wait":
             _agent.wait()
         elif action == "start_capture":
-            _agent.start_capture(request["interface"], request["filename"], request.get("capture_filter"))
+            _agent.start_capture(
+                request["interface"],
+                request["filename"],
+                request.get("capture_filter"),
+            )
         elif action == "stop_capture":
             _agent.stop_capture()
         elif action == "read_capture_chunk":
-            return {"ok": True, **_agent.read_capture_chunk(request["offset"], request["size"])}
-            
-        # SIH DUAL-MODE WORKFLOW ACTIONS
+            return {
+                "ok": True,
+                **_agent.read_capture_chunk(
+                    request["offset"],
+                    request["size"],
+                ),
+            }
         elif action == "start_experiment":
             _agent.start_experiment(
                 duration=float(request.get("duration", 30)),
-                mode=request.get("mode", "random"),
-                traffic_type=request.get("traffic_type", "voip")
+                mode=request.get("mode", "configured"),
+                traffic_type=request.get("traffic_type"),
+                configuration=request.get("configuration"),
             )
         elif action == "experiment_status":
             return {"ok": True, **_agent.experiment_status()}
         elif action == "stop_experiment":
             _agent.stop_experiment()
         elif action == "read_file_chunk":
-            return {"ok": True, **_agent.read_file_chunk(request["filename"], request["offset"], request["size"])}
-            
+            return {
+                "ok": True,
+                **_agent.read_file_chunk(
+                    request["filename"],
+                    request["offset"],
+                    request["size"],
+                ),
+            }
         else:
             raise AgentError(f"Unknown action: {action}")
+
         return {"ok": True}
+
     except Exception as exc:
         return {"ok": False, "error": str(exc)}

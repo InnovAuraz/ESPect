@@ -295,8 +295,10 @@ class Controller:
 
         offset = 0
         chunk_size = 32 * 1024
+        temporary_output = output.with_name(f".{output.name}.download")
+        temporary_output.unlink(missing_ok=True)
 
-        with output.open("wb") as file:
+        with temporary_output.open("wb") as file:
             while True:
                 response = send(
                     self.agent_a,
@@ -310,6 +312,8 @@ class Controller:
 
                 if response["eof"]:
                     break
+
+            temporary_output.replace(output)
 
 
 def send(
