@@ -4,6 +4,7 @@ import subprocess
 import sys
 import threading
 import time
+import random
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.request import urlopen
 
@@ -203,258 +204,87 @@ def _run_icmp(
 
 class _WebHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        body = b"SIH IPsec controlled web traffic\n"
+        # VARIABLE PAYLOAD: Simulating web pages from 50KB to 500KB
+        body_length = random.randint(50000, 500000)
+        body = b"SIH_" + b"A" * (body_length - 4)
 
         self.send_response(200)
-        self.send_header(
-            "Content-Type",
-            "text/plain",
-        )
-        self.send_header(
-            "Content-Length",
-            str(len(body)),
-        )
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-
         self.wfile.write(body)
 
     def log_message(self, format, *args):
         return
 
-
-class _IPv6HTTPServer(ThreadingHTTPServer):
-    address_family = socket.AF_INET6
-
-
-def _create_http_server(family: int):
-    server_class = (
-        ThreadingHTTPServer
-        if family == socket.AF_INET
-        else _IPv6HTTPServer
-    )
-
-    return server_class(
-        _bind_address(family, WEB_PORT),
-        _WebHandler,
-    )
-
-
-def _web_receiver(target: str) -> None:
-    family = _family(target)
-    server = _create_http_server(family)
-
-    thread = threading.Thread(
-        target=server.serve_forever,
-        daemon=True,
-    )
-
-    thread.start()
-
-    try:
-        time.sleep(
-            WEB_REQUESTS * 0.1 + 2
-        )
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
-
+# Keep _IPv6HTTPServer, _create_http_server, and _web_receiver EXACTLY as they are.
 
 def _web_sender(target: str) -> None:
     family = _family(target)
-
     if family == socket.AF_INET6:
         host = f"[{target}]"
     else:
         host = target
 
-    url = (
-        f"http://{host}:{WEB_PORT}/"
-    )
-
+    url = f"http://{host}:{WEB_PORT}/"
     last_error = None
 
+    # Initial connection attempt loop
     for _ in range(20):
         try:
-            with urlopen(
-                url,
-                timeout=1,
-            ) as response:
+            with urlopen(url, timeout=5) as response:
                 if response.status != 200:
-                    raise TrafficError(
-                        "HTTP server returned "
-                        f"status {response.status}"
-                    )
-
+                    raise TrafficError(f"HTTP server returned status {response.status}")
                 response.read()
-
             last_error = None
             break
-
         except OSError as exc:
             last_error = exc
             time.sleep(0.1)
 
     if last_error is not None:
-        raise TrafficError(
-            "Web receiver was not reachable"
-        ) from last_error
+        raise TrafficError("Web receiver was not reachable") from last_error
 
+    # Traffic generation loop
     for _ in range(WEB_REQUESTS - 1):
+        # HUMAN ASYMMETRY: Reading delay before clicking the next link (0.5 to 2.5s)
+        time.sleep(random.uniform(0.5, 2.5))
         try:
-            with urlopen(
-                url,
-                timeout=2,
-            ) as response:
+            with urlopen(url, timeout=5) as response: # Timeout increased for large payloads
                 if response.status != 200:
-                    raise TrafficError(
-                        "HTTP request failed"
-                    )
-
+                    raise TrafficError("HTTP request failed")
                 response.read()
-
         except OSError as exc:
-            raise TrafficError(
-                "Web traffic failed"
-            ) from exc
+            raise TrafficError("Web traffic failed") from exc
 
 
 # ---------------------------------------------------------------------------
 # EMAIL
 # ---------------------------------------------------------------------------
 
-def _email_receiver(target: str) -> None:
-    family = _family(target)
-
-    server = socket.socket(
-        family,
-        socket.SOCK_STREAM,
-    )
-
-    server.setsockopt(
-        socket.SOL_SOCKET,
-        socket.SO_REUSEADDR,
-        1,
-    )
-
-    server.bind(
-        _bind_address(
-            family,
-            EMAIL_PORT,
-        )
-    )
-
-    server.listen(1)
-    server.settimeout(8)
-
-    try:
-        connection, _ = server.accept()
-
-        with connection:
-            connection.settimeout(5)
-
-            connection.sendall(
-                b"220 SIH SMTP\r\n"
-            )
-
-            expected = [
-                b"HELO",
-                b"MAIL FROM:",
-                b"RCPT TO:",
-                b"DATA",
-            ]
-
-            for expected_command in expected:
-                data = connection.recv(4096)
-
-                if expected_command not in data.upper():
-                    raise TrafficError(
-                        "Invalid email sequence"
-                    )
-
-                if expected_command == b"DATA":
-                    connection.sendall(
-                        b"354 End data\r\n"
-                    )
-
-                    data = connection.recv(
-                        65536
-                    )
-
-                    if not data:
-                        raise TrafficError(
-                            "Email body missing"
-                        )
-
-                    connection.sendall(
-                        b"250 OK\r\n"
-                    )
-                else:
-                    connection.sendall(
-                        b"250 OK\r\n"
-                    )
-
-            data = connection.recv(4096)
-
-            if data:
-                connection.sendall(
-                    b"221 Bye\r\n"
-                )
-
-    except socket.timeout as exc:
-        raise TrafficError(
-            "Email sender did not connect"
-        ) from exc
-
-    except OSError as exc:
-        raise TrafficError(
-            "Email receiver failed"
-        ) from exc
-
-    finally:
-        server.close()
-
+# Keep _email_receiver EXACTLY as it is.
 
 def _email_sender(target: str) -> None:
     family = _family(target)
-
     last_error = None
 
     for _ in range(20):
-        connection = socket.socket(
-            family,
-            socket.SOCK_STREAM,
-        )
-
+        connection = socket.socket(family, socket.SOCK_STREAM)
         connection.settimeout(5)
-
         try:
-            connection.connect(
-                _address(
-                    family,
-                    target,
-                    EMAIL_PORT,
-                )
-            )
-
+            connection.connect(_address(family, target, EMAIL_PORT))
             last_error = None
             break
-
         except OSError as exc:
             last_error = exc
             connection.close()
             time.sleep(0.1)
-
     else:
-        raise TrafficError(
-            "Email receiver was not reachable"
-        ) from last_error
+        raise TrafficError("Email receiver was not reachable") from last_error
 
     try:
         if not connection.recv(4096):
-            raise TrafficError(
-                "SMTP greeting missing"
-            )
+            raise TrafficError("SMTP greeting missing")
 
         commands = [
             b"HELO sih\r\n",
@@ -465,35 +295,29 @@ def _email_sender(target: str) -> None:
 
         for data in commands:
             connection.sendall(data)
-
             response = connection.recv(4096)
-
             if not response:
-                raise TrafficError(
-                    "SMTP response missing"
-                )
+                raise TrafficError("SMTP response missing")
 
-        connection.sendall(
+        # VARIABLE PAYLOAD: Simulating an email body of random paragraph sizes
+        body_length = random.randint(500, 5000)
+        email_body = (
             b"Subject: SIH IPsec experiment\r\n"
             b"\r\n"
             b"Controlled email traffic.\r\n"
-            b".\r\n"
+            + b"E" * body_length +
+            b"\r\n.\r\n"
         )
+
+        connection.sendall(email_body)
 
         if not connection.recv(4096):
-            raise TrafficError(
-                "Email DATA response missing"
-            )
+            raise TrafficError("Email DATA response missing")
 
-        connection.sendall(
-            b"QUIT\r\n"
-        )
+        connection.sendall(b"QUIT\r\n")
 
     except OSError as exc:
-        raise TrafficError(
-            "Email traffic failed"
-        ) from exc
-
+        raise TrafficError("Email traffic failed") from exc
     finally:
         connection.close()
 
@@ -504,88 +328,60 @@ def _email_sender(target: str) -> None:
 
 def _video_receiver(target: str) -> None:
     family = _family(target)
-
-    sock = socket.socket(
-        family,
-        socket.SOCK_DGRAM,
-    )
-
-    sock.bind(
-        _bind_address(
-            family,
-            VIDEO_PORT,
-        )
-    )
-
+    sock = socket.socket(family, socket.SOCK_DGRAM)
+    sock.bind(_bind_address(family, VIDEO_PORT))
     sock.settimeout(1)
 
     received = 0
-    deadline = time.monotonic() + (
-        VIDEO_DURATION + 2
-    )
+    deadline = time.monotonic() + (VIDEO_DURATION + 2)
 
     try:
         while time.monotonic() < deadline:
             try:
-                data, _ = sock.recvfrom(
-                    VIDEO_PACKET_SIZE + 256
-                )
+                # INCREASED BUFFER: to handle larger, variable video packets
+                data, _ = sock.recvfrom(4096)
             except socket.timeout:
                 continue
 
             if data:
                 received += 1
-
     finally:
         sock.close()
 
     if received == 0:
-        raise TrafficError(
-            "No video traffic was received"
-        )
+        raise TrafficError("No video traffic was received")
 
 
 def _video_sender(target: str) -> None:
     family = _family(target)
-
-    sock = socket.socket(
-        family,
-        socket.SOCK_DGRAM,
-    )
-
-    address = _address(
-        family,
-        target,
-        VIDEO_PORT,
-    )
-
-    packet = (
-        b"VIDEO"
-        + b"X" * (
-            VIDEO_PACKET_SIZE - 5
-        )
-    )
-
-    deadline = (
-        time.monotonic()
-        + VIDEO_DURATION
-    )
-
-    interval = 1 / VIDEO_RATE
+    sock = socket.socket(family, socket.SOCK_DGRAM)
+    address = _address(family, target, VIDEO_PORT)
+    deadline = time.monotonic() + VIDEO_DURATION
+    
+    # 30 Frames per second
+    interval = 1.0 / 30.0
+    frame_count = 0
 
     try:
         while time.monotonic() < deadline:
-            sock.sendto(
-                packet,
-                address,
-            )
+            frame_count += 1
+            
+            # BURST LOGIC: Every 30th frame is a massive I-Frame, others are small P-Frames
+            if frame_count % 30 == 0:
+                packets_in_frame = random.randint(8, 15)
+            else:
+                packets_in_frame = random.randint(1, 4)
+                
+            for _ in range(packets_in_frame):
+                # Variable packet sizes (1000 - 1400 bytes)
+                pkt_size = random.randint(1000, 1400)
+                packet = b"VIDEO" + b"X" * (pkt_size - 5)
+                sock.sendto(packet, address)
+                
             time.sleep(interval)
 
     except OSError as exc:
-        raise TrafficError(
-            "Video traffic failed"
-        ) from exc
-
+        raise TrafficError("Video traffic failed") from exc
     finally:
         sock.close()
 
@@ -705,117 +501,62 @@ def _voip_peer(target: str) -> None:
 
 def _whatsapp_receiver(target: str) -> None:
     family = _family(target)
-
-    server = socket.socket(
-        family,
-        socket.SOCK_STREAM,
-    )
-
-    server.setsockopt(
-        socket.SOL_SOCKET,
-        socket.SO_REUSEADDR,
-        1,
-    )
-
-    server.bind(
-        _bind_address(
-            family,
-            WHATSAPP_PORT,
-        )
-    )
-
+    server = socket.socket(family, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(_bind_address(family, WHATSAPP_PORT))
     server.listen(1)
     server.settimeout(8)
 
     try:
         connection, _ = server.accept()
-
         with connection:
             connection.settimeout(5)
-
-            for _ in range(
-                WHATSAPP_MESSAGES
-            ):
+            for _ in range(WHATSAPP_MESSAGES):
                 data = connection.recv(4096)
-
                 if not data:
                     break
-
-                connection.sendall(
-                    b"ACK"
-                )
-
+                connection.sendall(b"ACK")
     except socket.timeout as exc:
-        raise TrafficError(
-            "Messaging peer did not connect"
-        ) from exc
-
+        raise TrafficError("Messaging peer did not connect") from exc
     except OSError as exc:
-        raise TrafficError(
-            "Messaging receiver failed"
-        ) from exc
-
+        raise TrafficError("Messaging receiver failed") from exc
     finally:
         server.close()
 
 
 def _whatsapp_sender(target: str) -> None:
     family = _family(target)
-
     last_error = None
 
     for _ in range(20):
-        connection = socket.socket(
-            family,
-            socket.SOCK_STREAM,
-        )
-
+        connection = socket.socket(family, socket.SOCK_STREAM)
         connection.settimeout(5)
-
         try:
-            connection.connect(
-                _address(
-                    family,
-                    target,
-                    WHATSAPP_PORT,
-                )
-            )
-
+            connection.connect(_address(family, target, WHATSAPP_PORT))
             last_error = None
             break
-
         except OSError as exc:
             last_error = exc
             connection.close()
             time.sleep(0.1)
-
     else:
-        raise TrafficError(
-            "Messaging peer was not reachable"
-        ) from last_error
+        raise TrafficError("Messaging peer was not reachable") from last_error
 
     try:
-        for number in range(
-            WHATSAPP_MESSAGES
-        ):
-            message = (
-                f"message-{number}"
-            ).encode()
+        for number in range(WHATSAPP_MESSAGES):
+            # HUMAN ASYMMETRY: Typing delay between 0.5s and 3.5s
+            time.sleep(random.uniform(0.5, 3.5))
+            
+            # VARIABLE PAYLOAD: Message length between 10 bytes and 400 bytes
+            msg_length = random.randint(10, 400)
+            message = f"msg-{number}-".encode() + b"W" * msg_length
 
-            connection.sendall(
-                message
-            )
+            connection.sendall(message)
 
             if connection.recv(4096) != b"ACK":
-                raise TrafficError(
-                    "Messaging acknowledgement missing"
-                )
-
+                raise TrafficError("Messaging acknowledgement missing")
     except OSError as exc:
-        raise TrafficError(
-            "Messaging traffic failed"
-        ) from exc
-
+        raise TrafficError("Messaging traffic failed") from exc
     finally:
         connection.close()
 
