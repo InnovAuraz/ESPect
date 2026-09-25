@@ -306,6 +306,7 @@ def _fetch_remote_pcap(
         file_data = bytearray()
         offset = 0
         chunk_size = 1024 * 1024
+
         while True:
             res = _agent_request(
                 VM1_HOST,
@@ -317,11 +318,15 @@ def _fetch_remote_pcap(
             )
             chunk = base64.b64decode(res["data"])
             file_data.extend(chunk)
+
             if res.get("eof", True):
                 break
+
             offset += len(chunk)
+
         if file_data:
             raw_bytes = bytes(file_data)
+
     except Exception:
         raw_bytes = b""
 
@@ -337,21 +342,18 @@ def _fetch_remote_pcap(
         or _CAPTURE_STATE.get("traffic_type")
         or "voip"
     )
+
     active_duration = float(
         override_duration
         or exp.get("duration")
         or _CAPTURE_STATE.get("duration")
         or 15
     )
-    session_id = int(_CAPTURE_STATE.get("session_id") or 1)
 
-    cleaned_bytes = _normalize_and_shape_pcap(
-        raw_bytes,
-        traffic_type=active_traffic,
-        target_duration=active_duration,
-        session_id=session_id,
-        percent=percent,
-    )
+    if not raw_bytes:
+        raise RuntimeError(
+            "No real PCAP was captured by VM1."
+        )
 
     _save_live_meta(
         traffic_type=active_traffic,
@@ -359,11 +361,11 @@ def _fetch_remote_pcap(
         encryption=exp.get("encryption"),
         integrity=exp.get("integrity"),
         pfs=exp.get("pfs"),
-        pcap_sha256=hashlib.sha256(cleaned_bytes).hexdigest(),
-        pcap_size=len(cleaned_bytes),
+        pcap_sha256=hashlib.sha256(raw_bytes).hexdigest(),
+        pcap_size=len(raw_bytes),
     )
 
-    return cleaned_bytes
+    return raw_bytes
 
 
 def _require_agents() -> None:
