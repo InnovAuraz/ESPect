@@ -241,27 +241,50 @@ class Agent:
     def experiment_status(self) -> dict:
         stage_file = Path("debug") / "logs" / "capture_status.json"
         stage = {}
+
         if stage_file.is_file():
             try:
-                stage = json.loads(stage_file.read_text(encoding="utf-8"))
+                stage = json.loads(
+                    stage_file.read_text(encoding="utf-8")
+                )
             except (OSError, json.JSONDecodeError):
                 stage = {}
 
         if self.experiment_process is None:
-            return {"status": "idle", "returncode": None, **stage}
+            stage_status = stage.get("status")
+
+            if stage_status in {"completed", "failed"}:
+                return {
+                    **stage,
+                    "status": stage_status,
+                    "returncode": stage.get("returncode"),
+                }
+
+            return {
+                **stage,
+                "status": "idle",
+                "returncode": None,
+            }
 
         returncode = self.experiment_process.poll()
+
         if returncode is None:
-            return {"status": "running", "returncode": None, **stage}
+            return {
+                **stage,
+                "status": "running",
+                "returncode": None,
+            }
 
         if self.experiment_log is not None:
             self.experiment_log.close()
             self.experiment_log = None
 
+        final_status = "completed" if returncode == 0 else "failed"
+
         return {
-            "status": "completed" if returncode == 0 else "failed",
-            "returncode": returncode,
             **stage,
+            "status": final_status,
+            "returncode": returncode,
         }
 
     def stop_experiment(self) -> None:
