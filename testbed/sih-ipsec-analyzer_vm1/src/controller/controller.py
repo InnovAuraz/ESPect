@@ -159,6 +159,7 @@ class Controller:
         role_b: str,
         ipsec_mode: str = "transport",
         ip_version: str = "ipv4",
+        duration: float | None = None,
     ) -> None:
         errors = []
 
@@ -195,6 +196,7 @@ class Controller:
                     "start",
                     target=target,
                     role=role,
+                    duration=duration,
                 )
             except ControllerError as exc:
                 errors.append(exc)

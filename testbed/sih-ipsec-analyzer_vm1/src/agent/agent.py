@@ -62,7 +62,7 @@ class Agent:
     def ipsec_status(self) -> str:
         return status()
 
-    def start_traffic(self, target: str, role: str) -> None:
+    def start_traffic(self, target: str, role: str, duration: float | None = None) -> None:
         if self.configuration is None:
             raise AgentError("Agent is not configured")
 
@@ -75,7 +75,7 @@ class Agent:
         traffic_type = self.configuration["traffic_type"]
 
         try:
-            args = command(traffic_type, role, target)
+            args = command(traffic_type, role, target, duration=duration)
         except Exception as exc:
             raise AgentError(str(exc)) from exc
 
@@ -369,7 +369,7 @@ def _handle(request: dict) -> dict:
         elif action == "ipsec_status":
             return {"ok": True, "status": _agent.ipsec_status()}
         elif action == "start":
-            _agent.start_traffic(request["target"], request["role"])
+            _agent.start_traffic(request["target"], request["role"], duration=request.get("duration"),)
         elif action == "wait":
             _agent.wait()
         elif action == "start_capture":

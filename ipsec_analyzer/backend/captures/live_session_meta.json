@@ -1,12 +1,12 @@
 {
-  "mode": "random",
-  "traffic_type": "video",
-  "duration": 30.0,
-  "session_id": 3,
-  "updated_at": 1790328641.9629092,
+  "mode": "targeted",
+  "traffic_type": "web",
+  "duration": 15.0,
+  "session_id": 2,
+  "updated_at": 1790418380.2258499,
   "encryption": "aes128-gcm16",
   "integrity": "none-aead",
   "pfs": true,
-  "pcap_sha256": "6399793004d86e0c833265b6f6b2efcd12c7d97383032fa3a534e7ecbaa3cffb",
-  "pcap_size": 689434
+  "pcap_sha256": "02c0e89d4b3f10fcf577030fafa3a8245ecc434579fcd1e66871fc97b8cdc0d4",
+  "pcap_size": 1783250
 }

@@ -170,6 +170,7 @@ def run_capture(configuration: dict, duration: float, output: Path) -> None:
             role_b,
             ipsec_mode=configuration["ipsec_mode"],
             ip_version=ip_version,
+            duration=duration,
         )
 
         write_status(stage="capturing", status="running")

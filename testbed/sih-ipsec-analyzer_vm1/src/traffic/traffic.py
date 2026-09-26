@@ -187,7 +187,7 @@ def _recv_until(sock: socket.socket, marker: bytes, maximum: int) -> bytes:
     return bytes(buffer)
 
 
-def command(traffic_type: str, role: str, target: str) -> list[str]:
+def command(traffic_type: str, role: str, target: str, duration: float | None = None) -> list[str]:
     if traffic_type not in TRAFFIC_TYPES:
         raise TrafficError(f"Unsupported traffic type: {traffic_type}")
     if role not in ROLES:
@@ -197,7 +197,7 @@ def command(traffic_type: str, role: str, target: str) -> list[str]:
 
     _family(target)
 
-    return [
+    args = [
         sys.executable,
         "-m",
         "src.traffic.traffic",
@@ -209,9 +209,26 @@ def command(traffic_type: str, role: str, target: str) -> list[str]:
         target,
     ]
 
+    if duration is not None:
+        args.extend(
+            [
+                "--duration",
+                str(duration),
+            ]
+        )
 
-def run(traffic_type: str, role: str, target: str) -> None:
-    args = command(traffic_type, role, target)
+    return args
+
+    # if duration is not None:
+    #     if duration <= 0:
+    #         raise TrafficError("Traffic duration must be greater than zero")
+    #     args += ["--duration", str(duration)]
+
+    # return args
+
+
+def run(traffic_type: str, role: str, target: str, duration: float | None = None) -> None:
+    args = command(traffic_type, role, target, duration=duration)
     try:
         result = subprocess.run(args, check=False)
     except OSError as exc:
@@ -568,7 +585,7 @@ def _email_sender(target: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _video_receiver(target: str) -> None:
+def _video_receiver(target: str, duration: float | None = None) -> None:
     family = _family(target)
     sock = socket.socket(family, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -576,7 +593,9 @@ def _video_receiver(target: str) -> None:
     sock.bind(_bind_address(family, VIDEO_PORT))
     sock.settimeout(0.5)
 
-    deadline = time.monotonic() + VIDEO_DURATION + VIDEO_RECEIVER_GRACE
+    deadline = time.monotonic() + (
+        VIDEO_DURATION if duration is None else duration
+    ) + VIDEO_RECEIVER_GRACE
     received = 0
 
     try:
@@ -594,7 +613,7 @@ def _video_receiver(target: str) -> None:
         raise TrafficError("No video traffic was received")
 
 
-def _video_sender(target: str) -> None:
+def _video_sender(target: str, duration: float | None = None) -> None:
     family = _family(target)
     sock = socket.socket(family, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4 * 1024 * 1024)
@@ -609,7 +628,7 @@ def _video_sender(target: str) -> None:
 
         while True:
             now = time.monotonic()
-            if now >= start + VIDEO_DURATION:
+            if now >= start + (VIDEO_DURATION if duration is None else duration):
                 break
 
             frame_number += 1
@@ -685,7 +704,7 @@ def _voip_packet(sequence: int, timestamp: int) -> bytes:
     return header + payload
 
 
-def _voip_peer(target: str) -> None:
+def _voip_peer(target: str, duration: float | None = None) -> None:
     family = _family(target)
     stop_event = threading.Event()
     counter = {"received": 0}
@@ -707,7 +726,7 @@ def _voip_peer(target: str) -> None:
         next_packet = start
         sequence = random.randint(0, 65_535)
         timestamp = random.randint(0, 2**31 - 1)
-        deadline = start + VOIP_DURATION
+        deadline = start + (VOIP_DURATION if duration is None else duration)
 
         while next_packet < deadline:
             _sleep_until(next_packet)
@@ -830,7 +849,12 @@ def _whatsapp_sender(target: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _run_profile(traffic_type: str, role: str, target: str) -> None:
+def _run_profile(
+    traffic_type: str,
+    role: str,
+    target: str,
+    duration: float | None = None,
+) -> None:
     if traffic_type == "icmp":
         _run_icmp(role, target)
         return
@@ -855,9 +879,9 @@ def _run_profile(traffic_type: str, role: str, target: str) -> None:
 
     if traffic_type == "video":
         if role == "sender":
-            _video_sender(target)
+            _video_sender(target, duration=duration)
         elif role == "receiver":
-            _video_receiver(target)
+            _video_receiver(target, duration=duration)
         else:
             raise TrafficError("Video supports sender/receiver roles only")
         return
@@ -865,7 +889,7 @@ def _run_profile(traffic_type: str, role: str, target: str) -> None:
     if traffic_type == "voip":
         if role != "peer":
             raise TrafficError("VoIP requires the peer role")
-        _voip_peer(target)
+        _voip_peer(target, duration=duration)
         return
 
     if traffic_type == "whatsapp":
@@ -903,10 +927,29 @@ def _main() -> int:
         required=True,
         help="Literal IPv4 or IPv6 address of the traffic peer",
     )
+    # parser.add_argument(
+    #     "--duration",
+    #     type=float,
+    #     default=None,
+    # )
+    
+    parser.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        help="Experiment duration in seconds; omitted keeps the profile default",
+    )
 
     args = parser.parse_args()
+    if args.duration is not None and args.duration <= 0:
+        parser.error("--duration must be greater than zero")
     try:
-        _run_profile(args.run, args.role, args.target)
+        _run_profile(
+            args.run,
+            args.role,
+            args.target,
+            duration=args.duration,
+        )
     except TrafficError as exc:
         print(str(exc), file=sys.stderr)
         return 1
