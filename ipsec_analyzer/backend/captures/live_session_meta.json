@@ -2,11 +2,11 @@
   "mode": "targeted",
   "traffic_type": "video",
   "duration": 15,
-  "session_id": 16,
-  "updated_at": 1790436150.9128144,
+  "session_id": 20,
+  "updated_at": 1790460247.0130434,
   "encryption": "aes128-gcm16",
   "integrity": "none-aead",
   "pfs": true,
-  "pcap_sha256": "02d0830ff079ef96e55db72ef36375d21ca52498309ac9063708180c96e02a4b",
-  "pcap_size": 659672
+  "pcap_sha256": "f5c7d3d5ac7e440863a55344e01da54735d633926d3fe7d80b85f0db5a9559ec",
+  "pcap_size": 663276
 }

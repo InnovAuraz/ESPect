@@ -6,7 +6,7 @@ import ErrorBanner from "./ErrorBanner";
 // -------------------------------------------------------------
 function slicePcapArrayBuffer(buffer, percent) {
   const pct = Math.max(1, Math.min(100, Number(percent) || 100));
-  if (pct >= 100 || !buffer || buffer.byteLength <= 24) {
+  if (pct >= 100 || !buffer || 24 >= buffer.byteLength) {
     return buffer;
   }
 
@@ -19,7 +19,7 @@ function slicePcapArrayBuffer(buffer, percent) {
 
   if (isLePcap || isBePcap) {
     let offset = 24;
-    while (offset + 16 <= buffer.byteLength) {
+    while (buffer.byteLength >= offset + 16) {
       const inclLen = view.getUint32(offset + 8, isLePcap);
       const nextOffset = offset + 16 + inclLen;
       if (nextOffset > buffer.byteLength || inclLen > 655350) {
@@ -61,8 +61,8 @@ function buildValidIpsecPcapBuffer(percent, trafficType, durationSec) {
   const startSec = Math.floor(Date.now() / 1000) - Math.ceil((dur * pct) / 100);
   const timeStep = ((dur * pct) / 100) / Math.max(1, packetCount);
 
-  for (let i = 0; i < packetCount; i++) {
-    const isIke = i < 4;
+  for (let i = 0; packetCount > i; i++) {
+    const isIke = 4 > i;
     const bodyLen = isIke ? 180 : cfg.payloadSize + ((i * 17) % 64);
     const totalPktLen = 14 + 20 + bodyLen;
     const pkt = new Uint8Array(totalPktLen);
@@ -95,12 +95,12 @@ function buildValidIpsecPcapBuffer(percent, trafficType, durationSec) {
       dv.setUint16(40, 0, false);
       // IKEv2 version 0x20, exchange type 34 (IKE_SA_INIT) or 35 (IKE_AUTH)
       pkt[42 + 17] = 0x20;
-      pkt[42 + 18] = i < 2 ? 34 : 35;
+      pkt[42 + 18] = 2 > i ? 34 : 35;
     } else {
       // ESP Header: SPI + Sequence Number
       dv.setUint32(34, flip ? 0xc61357ea : 0xc3ce664f, false);
       dv.setUint32(38, i, false);
-      for (let b = 42; b < totalPktLen; b++) {
+      for (let b = 42; totalPktLen > b; b++) {
         pkt[b] = (b * 31 + i) & 0xff;
       }
     }
@@ -127,7 +127,7 @@ function buildValidIpsecPcapBuffer(percent, trafficType, durationSec) {
   outView.setUint32(20, 1, true); // LINKTYPE_ETHERNET
 
   let offset = 24;
-  for (let i = 0; i < packets.length; i++) {
+  for (let i = 0; packets.length > i; i++) {
     const p = packets[i];
     const len = p.bytes.byteLength;
     outView.setUint32(offset, p.tsSec, true);
@@ -179,7 +179,7 @@ async function fetchAndSavePcap({ percent, trafficType, duration, fileName }) {
     "http://127.0.0.1:8000/api/capture/download" + query,
   ];
 
-  for (let i = 0; i < urls.length; i++) {
+  for (let i = 0; urls.length > i; i++) {
     try {
       const response = await fetch(urls[i]);
       if (response.ok) {
@@ -209,8 +209,8 @@ async function fetchAndSavePcap({ percent, trafficType, duration, fileName }) {
 // -------------------------------------------------------------
 function MiniTerminal({ active }) {
   const [lines, setLines] = useState([
-    "[SYS] Interface eth1 ready.",
-    "Waiting for connection...",
+    "[SYS] Interface eth1 bound (PROMISC).",
+    "[IDLE] Waiting for IKEv2 / ESP stream...",
   ]);
   const terminalRef = useRef(null);
 
@@ -222,12 +222,12 @@ function MiniTerminal({ active }) {
 
   useEffect(() => {
     if (!active) {
-      setLines((l) => [...l.slice(-3), "[SYS] Connection closed."]);
+      setLines((l) => [...l.slice(-3), "[SYS] Capture socket in standby."]);
       return;
     }
     setLines([
-      "tcpdump: listening on eth1, link-type EN10MB",
-      "Capture started...",
+      "tcpdump: listening on eth1, link-type EN10MB (Ethernet)",
+      "[ACQ] Filtering UDP 500/4500 & IPPROTO-50...",
     ]);
 
     const interval = setInterval(() => {
@@ -240,8 +240,8 @@ function MiniTerminal({ active }) {
       const len = Math.floor(Math.random() * 900) + 64;
 
       const newLine = isEsp
-        ? time + " IP 192.168.160.128 -> 192.168.160.129: ESP(spi=0x" + spi + ",seq=0x" + seq + "), length " + len
-        : time + " IP 192.168.160.128.4500 -> 192.168.160.129.4500: UDP, length " + len;
+        ? time + " IP 192.168.160.128 → 192.168.160.129: ESP(spi=0x" + spi + ",seq=0x" + seq + "), len " + len
+        : time + " IP 192.168.160.128.4500 → 192.168.160.129.4500: UDP-ENCAP, len " + len;
 
       setLines((prev) => [...prev.slice(-4), newLine]);
     }, 250);
@@ -253,15 +253,15 @@ function MiniTerminal({ active }) {
     "div",
     {
       style: {
-        height: "100px",
+        height: "118px",
         marginTop: "16px",
-        background: "#0a0f14",
-        border: "1px solid rgba(0, 229, 255, 0.2)",
-        borderRadius: "6px",
+        background: "#080c11",
+        border: "1px solid rgba(0, 229, 255, 0.25)",
+        borderRadius: "8px",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
-        boxShadow: "inset 0 0 15px rgba(0,0,0,0.8)",
+        boxShadow: "inset 0 0 20px rgba(0,0,0,0.9)",
       },
     },
     h(
@@ -270,22 +270,39 @@ function MiniTerminal({ active }) {
         style: {
           display: "flex",
           alignItems: "center",
-          padding: "4px 8px",
+          justifyContent: "space-between",
+          padding: "6px 10px",
           background: "#131822",
-          borderBottom: "1px solid rgba(255,255,255,0.05)",
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
         },
       },
       h(
         "div",
-        { style: { display: "flex", gap: "4px", marginRight: "12px" } },
-        h("div", { style: { width: "8px", height: "8px", borderRadius: "50%", background: "#ff5f56" } }),
-        h("div", { style: { width: "8px", height: "8px", borderRadius: "50%", background: "#ffbd2e" } }),
-        h("div", { style: { width: "8px", height: "8px", borderRadius: "50%", background: "#27c93f" } })
+        { style: { display: "flex", alignItems: "center", gap: "10px" } },
+        h(
+          "div",
+          { style: { display: "flex", gap: "5px" } },
+          h("div", { style: { width: "8px", height: "8px", borderRadius: "50%", background: "#ff5f56" } }),
+          h("div", { style: { width: "8px", height: "8px", borderRadius: "50%", background: "#ffbd2e" } }),
+          h("div", { style: { width: "8px", height: "8px", borderRadius: "50%", background: "#27c93f" } })
+        ),
+        h(
+          "div",
+          { style: { fontSize: "10px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" } },
+          "root@node-01-ctrl:~# tcpdump -i eth1"
+        )
       ),
       h(
-        "div",
-        { style: { fontSize: "9px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" } },
-        "root@node-01-ctrl:~# tcpdump"
+        "span",
+        {
+          style: {
+            fontSize: "9px",
+            fontFamily: "var(--font-mono)",
+            color: active ? "var(--emerald-400)" : "var(--text-muted)",
+            fontWeight: "700"
+          }
+        },
+        active ? "● PROMISC" : "○ IDLE"
       )
     ),
     h(
@@ -293,10 +310,11 @@ function MiniTerminal({ active }) {
       {
         ref: terminalRef,
         style: {
-          padding: "6px 8px",
+          padding: "8px 10px",
           overflowY: "auto",
           fontFamily: "var(--font-mono)",
-          fontSize: "10px",
+          fontSize: "10.5px",
+          lineHeight: "1.55",
           display: "flex",
           flexDirection: "column",
           justifyContent: "flex-end",
@@ -312,7 +330,7 @@ function MiniTerminal({ active }) {
               whiteSpace: "nowrap",
               overflow: "hidden",
               textOverflow: "ellipsis",
-              color: i === lines.length - 1 && active ? "var(--neon-cyan)" : "var(--text-muted)",
+              color: i === lines.length - 1 && active ? "var(--neon-cyan)" : "var(--text-secondary)",
               textShadow: i === lines.length - 1 && active ? "var(--shadow-glow-cyan)" : "none",
             },
           },
@@ -327,40 +345,40 @@ function MiniTerminal({ active }) {
 // Mini Oscilloscope Component (System B)
 // -------------------------------------------------------------
 function MiniGraph({ active }) {
-  const [data, setData] = useState(Array(20).fill(0));
+  const [data, setData] = useState(Array(20).fill(8));
 
   useEffect(() => {
     if (!active) {
       const interval = setInterval(() => {
-        setData((prev) => [...prev.slice(1), prev[prev.length - 1] * 0.8]);
-      }, 100);
+        setData((prev) => [...prev.slice(1), Math.max(4, prev[prev.length - 1] * 0.82)]);
+      }, 120);
       return () => clearInterval(interval);
     }
 
     const interval = setInterval(() => {
-      setData((prev) => [...prev.slice(1), Math.random() * 45 + 5]);
+      setData((prev) => [...prev.slice(1), Math.random() * 38 + 8]);
     }, 150);
 
     return () => clearInterval(interval);
   }, [active]);
 
-  const polyPoints =
-    "0,50 " +
-    data.map((v, i) => String(i * 10.5) + "," + String(50 - v)).join(" ") +
-    " 200,50";
+  const linePoints = data
+    .map((v, i) => String(i * 10.5) + "," + String(50 - v))
+    .join(" ");
+  const polyPoints = "0,50 " + linePoints + " 200,50";
 
   return h(
     "div",
     {
       style: {
-        height: "100px",
+        height: "118px",
         marginTop: "16px",
-        background: "rgba(0,0,0,0.3)",
-        border: "1px solid rgba(157, 78, 221, 0.2)",
-        borderRadius: "6px",
+        background: "#080c11",
+        border: "1px solid rgba(187, 134, 252, 0.25)",
+        borderRadius: "8px",
         position: "relative",
         overflow: "hidden",
-        boxShadow: "inset 0 0 15px rgba(157,78,221,0.05)",
+        boxShadow: "inset 0 0 20px rgba(0,0,0,0.9)",
       },
     },
     h("div", {
@@ -368,26 +386,25 @@ function MiniGraph({ active }) {
         position: "absolute",
         inset: 0,
         backgroundImage:
-          "linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)",
-        backgroundSize: "10px 10px",
+          "linear-gradient(rgba(187, 134, 252, 0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(187, 134, 252, 0.04) 1px, transparent 1px)",
+        backgroundSize: "12px 12px",
       },
     }),
     h(
-      "svg",
+      "div",
       {
-        width: "100%",
-        height: "100%",
-        viewBox: "0 0 200 50",
-        preserveAspectRatio: "none",
-        style: { position: "absolute", bottom: 0 },
+        style: {
+          position: "absolute",
+          top: "8px",
+          left: "10px",
+          fontSize: "9px",
+          color: "var(--text-muted)",
+          fontFamily: "var(--font-mono)",
+          letterSpacing: "1px",
+          fontWeight: "700"
+        }
       },
-      h("polyline", {
-        fill: active ? "rgba(157, 78, 221, 0.15)" : "transparent",
-        stroke: active ? "var(--neon-purple)" : "var(--text-muted)",
-        strokeWidth: "1.5",
-        points: polyPoints,
-        style: { filter: active ? "drop-shadow(0 0 4px rgba(157,78,221,0.6))" : "none" },
-      })
+      "ESP PAYLOAD OSCILLOSCOPE"
     ),
     h(
       "div",
@@ -400,11 +417,33 @@ function MiniGraph({ active }) {
           color: active ? "var(--neon-purple)" : "var(--text-muted)",
           fontFamily: "var(--font-mono)",
           letterSpacing: "1px",
-          fontWeight: "700",
+          fontWeight: "800",
           textShadow: active ? "var(--shadow-glow-purple)" : "none",
         },
       },
-      active ? "TX/RX ENCRYPTED" : "TX/RX IDLE"
+      active ? "● TX/RX ENCRYPTED" : "○ TX/RX IDLE"
+    ),
+    h(
+      "svg",
+      {
+        width: "100%",
+        height: "100%",
+        viewBox: "0 0 200 50",
+        preserveAspectRatio: "none",
+        style: { position: "absolute", bottom: 0 },
+      },
+      h("polyline", {
+        fill: active ? "rgba(187, 134, 252, 0.16)" : "rgba(255,255,255,0.02)",
+        stroke: "none",
+        points: polyPoints,
+      }),
+      h("polyline", {
+        fill: "none",
+        stroke: active ? "var(--neon-purple)" : "var(--text-muted)",
+        strokeWidth: "2",
+        points: linePoints,
+        style: { filter: active ? "drop-shadow(0 0 6px var(--neon-purple))" : "none" },
+      })
     )
   );
 }
@@ -433,7 +472,6 @@ export default function LiveCaptureView({
   const [isCaptureComplete, setIsCaptureComplete] = useState(false);
 
   const captureStatusComplete = session?.capture_status === "completed";
-
   const canAnalyzeCapture = !isRunning && isCaptureComplete && captureStatusComplete;
 
   const [downloadState, setDownloadState] = useState("idle");
@@ -458,17 +496,17 @@ export default function LiveCaptureView({
   const [logs, setLogs] = useState([
     "[SYS] Analyzer Node Online. Waiting for capture initialization...",
   ]);
-  const [graphData, setGraphData] = useState(Array(40).fill(0));
+  const [graphData, setGraphData] = useState(Array(40).fill(12));
 
   const mainConsoleRef = useRef(null);
 
   useEffect(() => {
-  if (captureError) {
-    setIsCaptureComplete(false);
-    setTimeLeft(0);
-    setLogs((l) => [...l, "[Error] " + captureError]);
-  }
-}, [captureError]);
+    if (captureError) {
+      setIsCaptureComplete(false);
+      setTimeLeft(0);
+      setLogs((l) => [...l, "[Error] " + captureError]);
+    }
+  }, [captureError]);
 
   useEffect(() => {
     if (!isRunning) return;
@@ -568,7 +606,7 @@ export default function LiveCaptureView({
 
   const onStopCapture = () => {
     setTimeLeft(0);
-    setGraphData(Array(40).fill(0));
+    setGraphData(Array(40).fill(12));
     setLogs((l) => [
       ...l,
       "[Error] Halting capture: Operator triggered manual abort. Tearing down IPsec SA...",
@@ -690,25 +728,27 @@ export default function LiveCaptureView({
   const currentPackets = Math.round((fullPkts * generatedPercent) / 100);
   const currentBytes = ((fullKb * generatedPercent) / 100).toFixed(1);
   const flows = isRunning ? (elapsed > 1 ? 2 : 0) : isCaptureComplete || elapsed > 0 ? 2 : 0;
+  const completedStepsCount = Math.max(0, Math.min(8, workflowStep + 1));
 
   const selectStyle = {
-    padding: "10px 16px",
-    background: "rgba(0,0,0,0.4)",
-    border: "1px solid rgba(255,255,255,0.1)",
+    padding: "10px 14px",
+    background: "#080c11",
+    border: "1px solid rgba(0, 229, 255, 0.28)",
     color: "var(--neon-cyan)",
     borderRadius: "6px",
     outline: "none",
     fontFamily: "var(--font-mono)",
     cursor: isRunning ? "not-allowed" : "pointer",
-    boxShadow: "inset 0 0 10px rgba(0,0,0,0.5)",
+    boxShadow: "inset 0 0 12px rgba(0,0,0,0.7)",
     fontSize: "13px",
-    fontWeight: "600",
+    fontWeight: "700",
+    minWidth: "190px"
   };
 
   const optionStyle = { background: "#0a0f14", color: "var(--neon-cyan)" };
 
   const mainGraphLinePoints = graphData
-    .map((val, i) => String(i * 10) + "," + String(100 - val))
+    .map((val, i) => String(i * 10.25) + "," + String(100 - (isRunning ? val : 12 + Math.sin(i * 0.5) * 4)))
     .join(" ");
   const mainGraphFillPoints = "0,100 " + mainGraphLinePoints + " 400,100";
 
@@ -728,6 +768,37 @@ export default function LiveCaptureView({
       ? "var(--emerald-400)"
       : "var(--neon-purple)";
 
+  const telemetryCards = [
+    {
+      code: "0xCA01",
+      label: "PACKETS CAPTURED",
+      val: currentPackets.toLocaleString(),
+      unit: "pkts",
+      color: "var(--neon-cyan)"
+    },
+    {
+      code: "0xCA02",
+      label: "DATA VOLUME",
+      val: String(currentBytes),
+      unit: "KB",
+      color: "var(--neon-purple)"
+    },
+    {
+      code: "0xCA03",
+      label: "ACTIVE ESP FLOWS",
+      val: String(flows),
+      unit: "SAs",
+      color: "var(--emerald-400)"
+    },
+    {
+      code: "0xCA04",
+      label: "ACQUISITION RATE",
+      val: isRunning ? String((fullPkts / Math.max(1, Number(duration))).toFixed(1)) : "0.0",
+      unit: "pkt/s",
+      color: "var(--neon-orange)"
+    }
+  ];
+
   return h(
     "div",
     {
@@ -741,13 +812,21 @@ export default function LiveCaptureView({
     },
     h(ErrorBanner, { message: captureError }),
 
-    // 1. SEPARATED PAGE HEADER
+    // 1. SEPARATED PAGE HEADER (Matches SystemInternals)
     h(
       "div",
       { style: { paddingBottom: "8px", paddingTop: "12px" } },
       h(
         "div",
-        { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-end" } },
+        {
+          style: {
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-end",
+            flexWrap: "wrap",
+            gap: "16px"
+          }
+        },
         h(
           "div",
           null,
@@ -760,9 +839,10 @@ export default function LiveCaptureView({
                 letterSpacing: "2px",
                 fontSize: "11px",
                 marginBottom: "8px",
+                fontWeight: "700"
               },
             },
-            "LIVE / CAPTURE SESSION"
+            "LIVE WIRE ACQUISITION // DUAL-VM TESTBED"
           ),
           h(
             "h1",
@@ -776,17 +856,17 @@ export default function LiveCaptureView({
                 textShadow: "0 2px 10px rgba(0,0,0,0.5)",
               },
             },
-            "Dual-endpoint acquisition"
+            "Dual-Endpoint Acquisition"
           ),
           h(
             "p",
-            { style: { color: "var(--text-secondary)", fontSize: "14px", marginTop: "8px" } },
-            "Initialize remote listeners and execute dynamic payload injection across IPsec tunnels."
+            { style: { color: "var(--text-secondary)", fontSize: "14px", marginTop: "8px", marginBottom: 0 } },
+            "Initialize remote tcpdump listeners and execute dynamic payload injection across StrongSwan IPsec tunnels."
           )
         ),
         h(
           "div",
-          { className: "capture-actions", style: { display: "flex", gap: "12px" } },
+          { className: "capture-actions", style: { display: "flex", gap: "12px", flexWrap: "wrap" } },
           h(
             "button",
             {
@@ -797,14 +877,16 @@ export default function LiveCaptureView({
               onMouseLeave: () => setHoveredBtn(null),
               disabled: isMutating && !isRunning,
               style: {
-                background: isRunning ? "rgba(255, 51, 102, 0.2)" : "rgba(157, 78, 221, 0.2)",
-                border: "1px solid " + (isRunning ? "var(--neon-red)" : "var(--neon-purple)"),
-                color: isRunning ? "var(--neon-red)" : "#d8b4fe",
+                background: isRunning ? "rgba(255, 51, 102, 0.2)" : "rgba(187, 134, 252, 0.18)",
+                border: "1.5px solid " + (isRunning ? "var(--neon-red)" : "var(--neon-purple)"),
+                color: isRunning ? "var(--neon-red)" : "#e9d5ff",
                 boxShadow: isRunning ? "var(--shadow-glow-red)" : "var(--shadow-glow-purple)",
                 padding: "12px 24px",
-                borderRadius: "6px",
+                borderRadius: "8px",
+                fontFamily: "var(--font-mono)",
+                fontSize: "12px",
                 fontWeight: "800",
-                letterSpacing: "1px",
+                letterSpacing: "1.2px",
                 textTransform: "uppercase",
                 transition: "all 0.25s ease",
                 transform: hoveredBtn === "topStart" ? "translateY(-2px)" : "translateY(0)",
@@ -823,16 +905,18 @@ export default function LiveCaptureView({
               onMouseLeave: () => setHoveredBtn(null),
               style: {
                 padding: "12px 24px",
-                borderRadius: "6px",
+                borderRadius: "8px",
+                fontFamily: "var(--font-mono)",
+                fontSize: "12px",
                 background:
                   downloadState === "incomplete"
-                    ? "rgba(255, 51, 102, 0.2)"
+                    ? "rgba(255, 51, 102, 0.18)"
                     : downloadState === "extracting"
-                    ? "rgba(0, 229, 255, 0.2)"
+                    ? "rgba(0, 229, 255, 0.18)"
                     : downloadState === "done"
-                    ? "rgba(0, 255, 163, 0.2)"
+                    ? "rgba(0, 255, 163, 0.18)"
                     : "rgba(0, 229, 255, 0.12)",
-                border: "1px solid " + downloadBorderColor,
+                border: "1.5px solid " + downloadBorderColor,
                 color:
                   downloadState === "incomplete"
                     ? "var(--neon-red)"
@@ -848,7 +932,7 @@ export default function LiveCaptureView({
                     ? "var(--shadow-glow-emerald)"
                     : "var(--shadow-glow-cyan)",
                 fontWeight: "800",
-                letterSpacing: "0.5px",
+                letterSpacing: "0.8px",
                 display: "flex",
                 alignItems: "center",
                 gap: "8px",
@@ -878,6 +962,7 @@ export default function LiveCaptureView({
       )
     ),
 
+    // Signature Glowing Divider
     h("hr", {
       style: {
         border: "none",
@@ -889,29 +974,53 @@ export default function LiveCaptureView({
       },
     }),
 
-    // 2. CAPTURE CONTROLS
+    // 2. MISSION ACQUISITION CONTROL DECK
     h(
       "div",
       {
         className: "card",
         style: {
-          padding: "24px",
+          padding: "22px 26px",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          background: "rgba(0,0,0,0.2)",
+          flexWrap: "wrap",
+          gap: "20px",
+          background: "rgba(10, 15, 22, 0.85)",
+          border: "1px solid rgba(0, 229, 255, 0.22)",
+          boxShadow: "inset 0 0 30px rgba(0,0,0,0.7)",
         },
       },
       h(
         "div",
-        { style: { display: "flex", gap: "32px", alignItems: "center", flexWrap: "wrap" } },
+        { style: { display: "flex", gap: "24px", alignItems: "center", flexWrap: "wrap" } },
+        // Control 1: Operation Mode
         h(
           "div",
-          { style: { display: "flex", flexDirection: "column", gap: "10px" } },
+          {
+            style: {
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px",
+              padding: "10px 14px",
+              background: "rgba(0,0,0,0.35)",
+              border: "1px solid rgba(255,255,255,0.05)",
+              borderLeft: "3px solid var(--neon-cyan)",
+              borderRadius: "8px"
+            }
+          },
           h(
             "label",
-            { style: { fontSize: "11px", color: "var(--text-muted)", fontWeight: 700, letterSpacing: "1px" } },
-            "OPERATION MODE"
+            {
+              style: {
+                fontSize: "10px",
+                color: "var(--text-muted)",
+                fontFamily: "var(--font-mono)",
+                fontWeight: 700,
+                letterSpacing: "1px"
+              }
+            },
+            "01 // OPERATION MODE"
           ),
           h(
             "select",
@@ -925,21 +1034,36 @@ export default function LiveCaptureView({
             h("option", { value: "targeted", style: optionStyle }, "Targeted (Testing Mode)")
           )
         ),
+
+        // Control 2: Traffic Payload
         h(
           "div",
           {
             style: {
               display: "flex",
               flexDirection: "column",
-              gap: "10px",
+              gap: "8px",
+              padding: "10px 14px",
+              background: "rgba(0,0,0,0.35)",
+              border: "1px solid rgba(255,255,255,0.05)",
+              borderLeft: "3px solid var(--neon-purple)",
+              borderRadius: "8px",
               opacity: mode === "random" ? 0.4 : 1,
               pointerEvents: mode === "random" ? "none" : "auto",
             },
           },
           h(
             "label",
-            { style: { fontSize: "11px", color: "var(--text-muted)", fontWeight: 700, letterSpacing: "1px" } },
-            "TRAFFIC PAYLOAD"
+            {
+              style: {
+                fontSize: "10px",
+                color: "var(--text-muted)",
+                fontFamily: "var(--font-mono)",
+                fontWeight: 700,
+                letterSpacing: "1px"
+              }
+            },
+            "02 // TRAFFIC PAYLOAD"
           ),
           h(
             "select",
@@ -957,157 +1081,190 @@ export default function LiveCaptureView({
             h("option", { value: "icmp", style: optionStyle }, "ICMP (Ping)")
           )
         ),
+
+        // Control 3: Duration Limit
         h(
           "div",
-          { style: { display: "flex", flexDirection: "column", gap: "10px" } },
+          {
+            style: {
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px",
+              padding: "10px 14px",
+              background: "rgba(0,0,0,0.35)",
+              border: "1px solid rgba(255,255,255,0.05)",
+              borderLeft: "3px solid var(--emerald-400)",
+              borderRadius: "8px"
+            }
+          },
           h(
             "label",
-            { style: { fontSize: "11px", color: "var(--text-muted)", fontWeight: 700, letterSpacing: "1px" } },
-            "DURATION LIMIT (SEC)"
+            {
+              style: {
+                fontSize: "10px",
+                color: "var(--text-muted)",
+                fontFamily: "var(--font-mono)",
+                fontWeight: 700,
+                letterSpacing: "1px"
+              }
+            },
+            "03 // DURATION (SEC)"
           ),
           h("input", {
             type: "number",
             value: duration,
             onChange: (e) => {
               const value = Number(e.target.value);
-
               if (!Number.isFinite(value)) {
                 setDuration(5);
                 return;
               }
-
               setDuration(Math.max(5, Math.min(120, value)));
             },
             disabled: isRunning,
             min: "5",
             max: "120",
             style: {
-              width: "100px",
-              padding: "10px 16px",
-              background: "rgba(0,0,0,0.4)",
-              border: "1px solid rgba(255,255,255,0.1)",
-              color: "var(--neon-cyan)",
+              width: "110px",
+              padding: "10px 14px",
+              background: "#080c11",
+              border: "1px solid rgba(0, 255, 163, 0.3)",
+              color: "var(--emerald-400)",
               borderRadius: "6px",
               outline: "none",
               fontFamily: "var(--font-mono)",
               fontSize: "13px",
-              fontWeight: "600",
-              boxShadow: "inset 0 0 10px rgba(0,0,0,0.5)",
+              fontWeight: "800",
+              boxShadow: "inset 0 0 12px rgba(0,0,0,0.7)",
             },
           })
         )
       ),
-      h(
-        "button",
-        {
-          type: "button",
-          onClick: handleAnalyzeClick,
-          onMouseEnter: () => setHoveredBtn("analyze"),
-          onMouseLeave: () => setHoveredBtn(null),
-          disabled: !canAnalyzeCapture || isMutating,
-          style: {
-            width: "170px",
-            height: "52px",
-            padding: "12px 18px",
-            borderRadius: "6px",
 
-            background: canAnalyzeCapture
-              ? "rgba(0,255,163,0.12)"
-              : "transparent",
-
-            border: canAnalyzeCapture
-              ? "1px solid var(--emerald-400)"
-              : "1px solid transparent",
-
-            color: canAnalyzeCapture
-              ? "var(--emerald-400)"
-              : "transparent",
-
-            fontWeight: "700",
-            letterSpacing: "0.5px",
-
-            cursor: canAnalyzeCapture
-              ? "pointer"
-              : "default",
-
-            visibility: canAnalyzeCapture
-              ? "visible"
-              : "hidden",
-
-            opacity: canAnalyzeCapture ? 1 : 0,
-
-            transition: "all 0.25s ease",
-
-            transform:
-              hoveredBtn === "analyze"
-                ? "translateY(-2px)"
-                : "translateY(0)",
-
-            boxShadow: canAnalyzeCapture
-              ? "var(--shadow-glow-emerald)"
-              : "none",
-          },
-        },
-        "▶ ANALYZE NOW"
-      ),
+      // Right Side: Analyze Now Button + Countdown Core
       h(
         "div",
-        {
-          style: {
-            background: "rgba(0,0,0,0.4)",
-            border: "1px solid rgba(255,255,255,0.05)",
-            padding: "16px 32px",
-            borderRadius: "8px",
-            textAlign: "right",
-            boxShadow: "inset 0 0 20px rgba(0,0,0,0.5)",
-          },
-        },
-        
+        { style: { display: "flex", alignItems: "center", gap: "18px", flexWrap: "wrap" } },
         h(
-          "div",
+          "button",
           {
+            type: "button",
+            onClick: handleAnalyzeClick,
+            onMouseEnter: () => setHoveredBtn("analyze"),
+            onMouseLeave: () => setHoveredBtn(null),
+            disabled: !canAnalyzeCapture || isMutating,
             style: {
-              fontSize: "10px",
-              color: "var(--text-muted)",
-              letterSpacing: "1px",
-              marginBottom: "4px",
-              fontWeight: "700",
-            },
-          },
-          "TIME REMAINING"
-        ),
-        h(
-          "div",
-          {
-            style: {
+              width: "175px",
+              height: "54px",
+              padding: "12px 18px",
+              borderRadius: "8px",
               fontFamily: "var(--font-mono)",
-              fontSize: "36px",
-              color: isRunning ? "var(--neon-cyan)" : "var(--text-muted)",
+              fontSize: "12px",
+              background: canAnalyzeCapture ? "rgba(0,255,163,0.15)" : "transparent",
+              border: canAnalyzeCapture ? "1.5px solid var(--emerald-400)" : "1px solid transparent",
+              color: canAnalyzeCapture ? "var(--emerald-400)" : "transparent",
               fontWeight: "800",
-              textShadow: isRunning ? "var(--shadow-glow-cyan)" : "none",
-              lineHeight: "1",
+              letterSpacing: "1px",
+              cursor: canAnalyzeCapture ? "pointer" : "default",
+              visibility: canAnalyzeCapture ? "visible" : "hidden",
+              opacity: canAnalyzeCapture ? 1 : 0,
+              transition: "all 0.25s ease",
+              transform: hoveredBtn === "analyze" ? "translateY(-2px)" : "translateY(0)",
+              boxShadow: canAnalyzeCapture ? "var(--shadow-glow-emerald)" : "none",
             },
           },
-          "00:" + String(timeLeft).padStart(2, "0")
+          "⚡ ANALYZE NOW"
+        ),
+
+        // Countdown Core Box
+        h(
+          "div",
+          {
+            style: {
+              minWidth: "165px",
+              background: "#080c11",
+              border: isRunning
+                ? "1px solid rgba(0, 229, 255, 0.4)"
+                : "1px solid rgba(255,255,255,0.08)",
+              padding: "14px 24px",
+              borderRadius: "8px",
+              textAlign: "right",
+              boxShadow: "inset 0 0 20px rgba(0,0,0,0.8)",
+            },
+          },
+          h(
+            "div",
+            {
+              style: {
+                fontSize: "10px",
+                color: "var(--text-muted)",
+                fontFamily: "var(--font-mono)",
+                letterSpacing: "1px",
+                marginBottom: "4px",
+                fontWeight: "700",
+              },
+            },
+            "TIME REMAINING"
+          ),
+          h(
+            "div",
+            {
+              style: {
+                fontFamily: "var(--font-mono)",
+                fontSize: "34px",
+                color: isRunning ? "var(--neon-cyan)" : "var(--text-primary)",
+                fontWeight: "900",
+                textShadow: isRunning ? "var(--shadow-glow-cyan)" : "none",
+                lineHeight: "1",
+              },
+            },
+            "00:" + String(timeLeft).padStart(2, "0")
+          ),
+          // Mini Progress Bar
+          h(
+            "div",
+            {
+              style: {
+                width: "100%",
+                height: "4px",
+                background: "rgba(255,255,255,0.08)",
+                borderRadius: "2px",
+                marginTop: "8px",
+                overflow: "hidden"
+              }
+            },
+            h("div", {
+              style: {
+                width: `${generatedPercent}%`,
+                height: "100%",
+                background: isRunning ? "var(--neon-cyan)" : "var(--emerald-400)",
+                boxShadow: "0 0 8px var(--neon-cyan)",
+                transition: "width 0.3s ease"
+              }
+            })
+          )
         )
       )
     ),
 
-    // 3. CAPTURE NODES GRID
+    // 3. CAPTURE NODES GRID (SystemInternals LinuxNodeCard Aesthetic)
     h(
       "div",
-      { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" } },
-      // System A
+      { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "24px" } },
+
+      // System A (Initiator / Controller)
       h(
         "div",
         {
           className: "card",
           style: {
             padding: "24px",
-            borderColor: isRunning ? "var(--neon-cyan)" : "rgba(255,255,255,0.05)",
+            background: "rgba(10, 15, 22, 0.85)",
+            border: "1px solid " + (isRunning ? "rgba(0, 229, 255, 0.4)" : "rgba(255,255,255,0.07)"),
+            borderLeft: "4px solid var(--neon-cyan)",
             boxShadow: isRunning
-              ? "0 0 20px rgba(0,229,255,0.1), inset 0 0 20px rgba(0,229,255,0.05)"
-              : "none",
+              ? "0 0 25px rgba(0,229,255,0.12), inset 0 0 25px rgba(0,229,255,0.06)"
+              : "inset 0 0 25px rgba(0,0,0,0.65)",
             display: "flex",
             flexDirection: "column",
             justifyContent: "space-between",
@@ -1118,7 +1275,7 @@ export default function LiveCaptureView({
           null,
           h(
             "div",
-            { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px" } },
+            { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "18px" } },
             h(
               "div",
               null,
@@ -1127,22 +1284,23 @@ export default function LiveCaptureView({
                 {
                   style: {
                     fontSize: "10px",
-                    letterSpacing: "1px",
+                    letterSpacing: "1.5px",
                     color: "var(--neon-cyan)",
                     fontFamily: "var(--font-mono)",
                     fontWeight: "700",
-                    marginBottom: "6px",
+                    marginBottom: "4px",
                   },
                 },
-                "192.168.160.128"
+                "INITIATOR NODE // 192.168.160.128"
               ),
               h(
                 "h3",
                 {
                   style: {
                     margin: 0,
-                    fontSize: "16px",
+                    fontSize: "18px",
                     color: "var(--text-primary)",
+                    fontFamily: "var(--font-mono)",
                     fontWeight: "800",
                     textShadow: isRunning ? "var(--shadow-glow-cyan)" : "none",
                   },
@@ -1155,78 +1313,69 @@ export default function LiveCaptureView({
               {
                 style: {
                   fontSize: "10px",
+                  fontFamily: "var(--font-mono)",
                   fontWeight: "800",
                   letterSpacing: "1px",
-                  padding: "4px 10px",
+                  padding: "4px 12px",
                   borderRadius: "20px",
-                  background: isRunning ? "rgba(0, 229, 255, 0.1)" : "rgba(255,255,255,0.05)",
+                  background: isRunning ? "rgba(0, 229, 255, 0.12)" : "rgba(255,255,255,0.04)",
                   color: isRunning ? "var(--neon-cyan)" : "var(--text-muted)",
-                  border: "1px solid " + (isRunning ? "var(--neon-cyan)" : "transparent"),
+                  border: "1px solid " + (isRunning ? "var(--neon-cyan)" : "rgba(255,255,255,0.1)"),
                   boxShadow: isRunning ? "var(--shadow-glow-cyan)" : "none",
                 },
               },
-              isRunning ? "CONNECTED" : "LISTENING"
+              isRunning ? "● CONNECTED" : "○ LISTENING"
             )
           ),
           h(
             "div",
-            { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" } },
+            {
+              style: {
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr 1fr",
+                gap: "12px",
+                padding: "12px",
+                background: "rgba(0,0,0,0.35)",
+                borderRadius: "6px",
+                border: "1px solid rgba(255,255,255,0.05)"
+              }
+            },
             h(
               "div",
               { style: { display: "flex", flexDirection: "column", gap: "4px" } },
-              h(
-                "span",
-                {
-                  style: {
-                    fontSize: "10px",
-                    color: "var(--text-muted)",
-                    fontFamily: "var(--font-mono)",
-                    textTransform: "uppercase",
-                    letterSpacing: "1px",
-                  },
-                },
-                "Interface"
-              ),
-              h("strong", { style: { color: "var(--text-primary)", fontFamily: "var(--font-mono)", fontSize: "13px" } }, "eth1")
+              h("span", { style: { fontSize: "9px", color: "var(--text-muted)", fontFamily: "var(--font-mono)", letterSpacing: "1px" } }, "INTERFACE"),
+              h("strong", { style: { color: "var(--neon-cyan)", fontFamily: "var(--font-mono)", fontSize: "12px" } }, "eth1 (EN10MB)")
             ),
             h(
               "div",
               { style: { display: "flex", flexDirection: "column", gap: "4px" } },
-              h(
-                "span",
-                {
-                  style: {
-                    fontSize: "10px",
-                    color: "var(--text-muted)",
-                    fontFamily: "var(--font-mono)",
-                    textTransform: "uppercase",
-                    letterSpacing: "1px",
-                  },
-                },
-                "Filter"
-              ),
-              h(
-                "strong",
-                { style: { color: "var(--text-primary)", fontFamily: "var(--font-mono)", fontSize: "13px" } },
-                "udp port 500/4500"
-              )
+              h("span", { style: { fontSize: "9px", color: "var(--text-muted)", fontFamily: "var(--font-mono)", letterSpacing: "1px" } }, "BPF FILTER"),
+              h("strong", { style: { color: "var(--text-primary)", fontFamily: "var(--font-mono)", fontSize: "12px" } }, "udp 500/4500")
+            ),
+            h(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+              h("span", { style: { fontSize: "9px", color: "var(--text-muted)", fontFamily: "var(--font-mono)", letterSpacing: "1px" } }, "DAEMON"),
+              h("strong", { style: { color: "var(--emerald-400)", fontFamily: "var(--font-mono)", fontSize: "12px" } }, "tcpdump + swanctl")
             )
           )
         ),
         h(MiniTerminal, { active: isRunning })
       ),
 
-      // System B
+      // System B (Responder / Peer)
       h(
         "div",
         {
           className: "card",
           style: {
             padding: "24px",
-            borderColor: isRunning ? "var(--neon-purple)" : "rgba(255,255,255,0.05)",
+            background: "rgba(10, 15, 22, 0.85)",
+            border: "1px solid " + (isRunning ? "rgba(187, 134, 252, 0.4)" : "rgba(255,255,255,0.07)"),
+            borderLeft: "4px solid var(--neon-purple)",
             boxShadow: isRunning
-              ? "0 0 20px rgba(157,78,221,0.1), inset 0 0 20px rgba(157,78,221,0.05)"
-              : "none",
+              ? "0 0 25px rgba(187,134,252,0.12), inset 0 0 25px rgba(187,134,252,0.06)"
+              : "inset 0 0 25px rgba(0,0,0,0.65)",
             display: "flex",
             flexDirection: "column",
             justifyContent: "space-between",
@@ -1237,7 +1386,7 @@ export default function LiveCaptureView({
           null,
           h(
             "div",
-            { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px" } },
+            { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "18px" } },
             h(
               "div",
               null,
@@ -1246,22 +1395,23 @@ export default function LiveCaptureView({
                 {
                   style: {
                     fontSize: "10px",
-                    letterSpacing: "1px",
+                    letterSpacing: "1.5px",
                     color: "var(--neon-purple)",
                     fontFamily: "var(--font-mono)",
                     fontWeight: "700",
-                    marginBottom: "6px",
+                    marginBottom: "4px",
                   },
                 },
-                "192.168.160.129"
+                "RESPONDER PEER // 192.168.160.129"
               ),
               h(
                 "h3",
                 {
                   style: {
                     margin: 0,
-                    fontSize: "16px",
+                    fontSize: "18px",
                     color: "var(--text-primary)",
+                    fontFamily: "var(--font-mono)",
                     fontWeight: "800",
                     textShadow: isRunning ? "var(--shadow-glow-purple)" : "none",
                   },
@@ -1274,61 +1424,50 @@ export default function LiveCaptureView({
               {
                 style: {
                   fontSize: "10px",
+                  fontFamily: "var(--font-mono)",
                   fontWeight: "800",
                   letterSpacing: "1px",
-                  padding: "4px 10px",
+                  padding: "4px 12px",
                   borderRadius: "20px",
-                  background: isRunning ? "rgba(157, 78, 221, 0.1)" : "rgba(255,255,255,0.05)",
+                  background: isRunning ? "rgba(187, 134, 252, 0.12)" : "rgba(255,255,255,0.04)",
                   color: isRunning ? "var(--neon-purple)" : "var(--text-muted)",
-                  border: "1px solid " + (isRunning ? "var(--neon-purple)" : "transparent"),
+                  border: "1px solid " + (isRunning ? "var(--neon-purple)" : "rgba(255,255,255,0.1)"),
                   boxShadow: isRunning ? "var(--shadow-glow-purple)" : "none",
                 },
               },
-              isRunning ? "CONNECTED" : "LISTENING"
+              isRunning ? "● CONNECTED" : "○ LISTENING"
             )
           ),
           h(
             "div",
-            { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" } },
+            {
+              style: {
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr 1fr",
+                gap: "12px",
+                padding: "12px",
+                background: "rgba(0,0,0,0.35)",
+                borderRadius: "6px",
+                border: "1px solid rgba(255,255,255,0.05)"
+              }
+            },
             h(
               "div",
               { style: { display: "flex", flexDirection: "column", gap: "4px" } },
-              h(
-                "span",
-                {
-                  style: {
-                    fontSize: "10px",
-                    color: "var(--text-muted)",
-                    fontFamily: "var(--font-mono)",
-                    textTransform: "uppercase",
-                    letterSpacing: "1px",
-                  },
-                },
-                "Interface"
-              ),
-              h("strong", { style: { color: "var(--text-primary)", fontFamily: "var(--font-mono)", fontSize: "13px" } }, "eth1")
+              h("span", { style: { fontSize: "9px", color: "var(--text-muted)", fontFamily: "var(--font-mono)", letterSpacing: "1px" } }, "INTERFACE"),
+              h("strong", { style: { color: "var(--neon-purple)", fontFamily: "var(--font-mono)", fontSize: "12px" } }, "eth1 (EN10MB)")
             ),
             h(
               "div",
               { style: { display: "flex", flexDirection: "column", gap: "4px" } },
-              h(
-                "span",
-                {
-                  style: {
-                    fontSize: "10px",
-                    color: "var(--text-muted)",
-                    fontFamily: "var(--font-mono)",
-                    textTransform: "uppercase",
-                    letterSpacing: "1px",
-                  },
-                },
-                "Filter"
-              ),
-              h(
-                "strong",
-                { style: { color: "var(--text-primary)", fontFamily: "var(--font-mono)", fontSize: "13px" } },
-                "udp port 500/4500"
-              )
+              h("span", { style: { fontSize: "9px", color: "var(--text-muted)", fontFamily: "var(--font-mono)", letterSpacing: "1px" } }, "BPF FILTER"),
+              h("strong", { style: { color: "var(--text-primary)", fontFamily: "var(--font-mono)", fontSize: "12px" } }, "udp 500/4500")
+            ),
+            h(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+              h("span", { style: { fontSize: "9px", color: "var(--text-muted)", fontFamily: "var(--font-mono)", letterSpacing: "1px" } }, "ENCAPSULATION"),
+              h("strong", { style: { color: "var(--emerald-400)", fontFamily: "var(--font-mono)", fontSize: "12px" } }, "RFC 4303 ESP")
             )
           )
         ),
@@ -1336,47 +1475,110 @@ export default function LiveCaptureView({
       )
     ),
 
-    // 4. WORKFLOW CARD
+    // 4. CAPTURE EXECUTION WORKFLOW (2-Column Tactical Pipeline)
     h(
       "div",
-      { className: "card" },
+      {
+        className: "card",
+        style: {
+          border: "1px solid rgba(0, 229, 255, 0.2)",
+          boxShadow: "inset 0 0 30px rgba(0,0,0,0.65)",
+          overflow: "hidden"
+        }
+      },
       h(
         "div",
         {
           className: "card-header",
           style: {
-            borderBottom: "1px solid rgba(255,255,255,0.05)",
-            padding: "20px 24px",
+            borderBottom: "1px solid rgba(255,255,255,0.06)",
+            padding: "18px 24px",
+            background: "rgba(13, 19, 29, 0.9)",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
+            flexWrap: "wrap",
+            gap: "12px"
           },
         },
-        h("div", { className: "card-title", style: { fontSize: "15px", fontWeight: "700" } }, "Capture Execution Workflow"),
-        manualStepError
-          ? h(
-              "div",
-              { style: { color: "var(--neon-red)", fontSize: "12px", fontWeight: "700", textShadow: "var(--shadow-glow-red)" } },
-              manualStepError
-            )
-          : null
+        h(
+          "div",
+          null,
+          h(
+            "div",
+            {
+              style: {
+                fontSize: "9px",
+                fontFamily: "var(--font-mono)",
+                color: "var(--neon-cyan)",
+                letterSpacing: "1.5px",
+                fontWeight: "700",
+                marginBottom: "2px"
+              }
+            },
+            "ORCHESTRATION STATE MACHINE // 8-STAGE VERIFICATION"
+          ),
+          h("div", { className: "card-title", style: { fontSize: "16px", fontWeight: "800" } }, "Capture Execution Workflow")
+        ),
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: "14px" } },
+          manualStepError
+            ? h(
+                "div",
+                {
+                  style: {
+                    color: "var(--neon-red)",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "11px",
+                    fontWeight: "800",
+                    background: "rgba(255, 51, 102, 0.1)",
+                    border: "1px solid rgba(255, 51, 102, 0.4)",
+                    padding: "4px 10px",
+                    borderRadius: "4px",
+                    textShadow: "var(--shadow-glow-red)"
+                  }
+                },
+                manualStepError
+              )
+            : null,
+          h(
+            "span",
+            {
+              style: {
+                fontSize: "10px",
+                fontFamily: "var(--font-mono)",
+                fontWeight: "800",
+                color: completedStepsCount === 8 ? "var(--emerald-400)" : "var(--neon-cyan)",
+                background: "rgba(0,0,0,0.5)",
+                border: "1px solid rgba(0, 229, 255, 0.3)",
+                padding: "4px 12px",
+                borderRadius: "20px",
+                letterSpacing: "1px"
+              }
+            },
+            `${completedStepsCount} / 8 STAGES VERIFIED`
+          )
+        )
       ),
       h(
         "div",
-        { style: { padding: "24px", display: "grid", gap: "12px" } },
+        {
+          style: {
+            padding: "22px 24px",
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+            gap: "12px"
+          }
+        },
         WORKFLOW_DEFS.map((step, index) => {
           const isDone = workflowStep >= index;
           const isCurrent = index === workflowStep + 1 && isRunning;
-          const stepBorder = isCurrent
-            ? "var(--neon-cyan)"
-            : isDone
-            ? "rgba(0, 255, 163, 0.3)"
-            : "rgba(255,255,255,0.05)";
-          const circleBorder = isCurrent
+          const stepAccent = isCurrent
             ? "var(--neon-cyan)"
             : isDone
             ? "var(--emerald-400)"
-            : "rgba(255,255,255,0.2)";
+            : "rgba(255,255,255,0.12)";
 
           return h(
             "div",
@@ -1386,82 +1588,108 @@ export default function LiveCaptureView({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
-                padding: "16px",
-                background: isCurrent ? "rgba(0, 229, 255, 0.05)" : "rgba(0,0,0,0.2)",
-                border: "1px solid " + stepBorder,
+                gap: "12px",
+                padding: "14px 16px",
+                background: isCurrent
+                  ? "rgba(0, 229, 255, 0.07)"
+                  : isDone
+                  ? "rgba(0, 255, 163, 0.03)"
+                  : "rgba(0,0,0,0.3)",
+                border: "1px solid " + (isCurrent ? "var(--neon-cyan)" : isDone ? "rgba(0, 255, 163, 0.28)" : "rgba(255,255,255,0.06)"),
+                borderLeft: "3px solid " + stepAccent,
                 borderRadius: "8px",
-                boxShadow: isCurrent ? "var(--shadow-glow-cyan)" : "none",
+                boxShadow: isCurrent ? "var(--shadow-glow-cyan)" : "inset 0 0 15px rgba(0,0,0,0.45)",
                 transition: "all 0.3s ease",
               },
             },
             h(
               "div",
-              { style: { display: "flex", alignItems: "center", gap: "16px" } },
+              { style: { display: "flex", alignItems: "center", gap: "14px", minWidth: 0 } },
               h(
                 "div",
                 {
                   style: {
                     width: "32px",
                     height: "32px",
-                    borderRadius: "50%",
+                    borderRadius: "8px",
+                    flexShrink: 0,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    fontSize: "14px",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "12px",
                     fontWeight: "800",
                     background: isCurrent
-                      ? "rgba(0, 229, 255, 0.1)"
+                      ? "rgba(0, 229, 255, 0.15)"
                       : isDone
-                      ? "rgba(0, 255, 163, 0.1)"
-                      : "transparent",
-                    border: "1px solid " + circleBorder,
+                      ? "rgba(0, 255, 163, 0.15)"
+                      : "rgba(255,255,255,0.03)",
+                    border: "1px solid " + stepAccent,
                     color: isCurrent ? "var(--neon-cyan)" : isDone ? "var(--emerald-400)" : "var(--text-muted)",
-                    boxShadow: isCurrent ? "0 0 15px var(--neon-cyan)" : "none",
+                    boxShadow: isCurrent ? "0 0 12px var(--neon-cyan)" : "none",
                   },
                 },
-                isCurrent ? "●" : isDone ? "✓" : "○"
+                isCurrent ? "●" : isDone ? "✓" : `0${index + 1}`
               ),
               h(
                 "div",
-                null,
+                { style: { minWidth: 0 } },
                 h(
                   "div",
-                  { style: { display: "flex", alignItems: "center", gap: "12px", marginBottom: "4px" } },
-                  h("span", { style: { color: "var(--text-primary)", fontSize: "14px", fontWeight: "700" } }, step.title),
+                  { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px", flexWrap: "wrap" } },
+                  h("span", { style: { color: "var(--text-primary)", fontSize: "13px", fontWeight: "800" } }, step.title),
                   h(
                     "span",
                     {
                       style: {
                         color: "var(--neon-purple)",
-                        fontSize: "10px",
+                        fontSize: "9px",
                         fontFamily: "var(--font-mono)",
-                        letterSpacing: "1px",
+                        letterSpacing: "0.8px",
                         textTransform: "uppercase",
                         fontWeight: "700",
+                        background: "rgba(187, 134, 252, 0.08)",
+                        border: "1px solid rgba(187, 134, 252, 0.25)",
+                        padding: "1px 6px",
+                        borderRadius: "4px"
                       },
                     },
                     step.endpoint
                   )
                 ),
-                h("div", { style: { color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: "12px" } }, step.command)
+                h(
+                  "div",
+                  {
+                    style: {
+                      color: "var(--text-muted)",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: "11px",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis"
+                    }
+                  },
+                  "$ " + step.command
+                )
               )
             ),
             h(
               "div",
-              null,
+              { style: { flexShrink: 0 } },
               isCurrent
                 ? h(
                     "span",
                     {
                       style: {
                         color: "var(--neon-cyan)",
-                        fontSize: "12px",
+                        fontFamily: "var(--font-mono)",
+                        fontSize: "11px",
                         fontWeight: "800",
                         textTransform: "uppercase",
                         letterSpacing: "1px",
                         display: "flex",
                         alignItems: "center",
-                        gap: "8px",
+                        gap: "6px",
                         textShadow: "var(--shadow-glow-cyan)",
                       },
                     },
@@ -1472,7 +1700,7 @@ export default function LiveCaptureView({
                         borderTopColor: "var(--neon-cyan)",
                       },
                     }),
-                    " Running"
+                    "RUNNING"
                   )
                 : h(
                     "button",
@@ -1481,19 +1709,20 @@ export default function LiveCaptureView({
                       onClick: () => handleManualStep(index),
                       disabled: isRunning || isMutating,
                       style: {
-                        background: "rgba(255,255,255,0.05)",
-                        border: "1px solid rgba(255,255,255,0.1)",
-                        color: "var(--text-primary)",
-                        padding: "8px 16px",
+                        background: isDone ? "rgba(0, 255, 163, 0.1)" : "rgba(255,255,255,0.04)",
+                        border: isDone ? "1px solid rgba(0, 255, 163, 0.35)" : "1px solid rgba(255,255,255,0.1)",
+                        color: isDone ? "var(--emerald-400)" : "var(--text-primary)",
+                        padding: "6px 12px",
                         borderRadius: "4px",
-                        fontSize: "12px",
-                        fontWeight: "600",
+                        fontFamily: "var(--font-mono)",
+                        fontSize: "10px",
+                        fontWeight: "800",
+                        letterSpacing: "0.8px",
                         cursor: isRunning ? "not-allowed" : "pointer",
-                        opacity: isDone ? 0.5 : 1,
                         transition: "all 0.2s",
                       },
                     },
-                    isDone ? "Verified" : "Verify Step"
+                    isDone ? "VERIFIED" : "VERIFY STEP"
                   )
             )
           );
@@ -1501,187 +1730,158 @@ export default function LiveCaptureView({
       )
     ),
 
-    // 5. TELEMETRY ANALYTICS
+    // 5. TELEMETRY ANALYTICS & MAIN OSCILLOSCOPE
     h(
       "div",
-      { className: "card" },
+      {
+        className: "card",
+        style: {
+          border: "1px solid rgba(0, 229, 255, 0.2)",
+          boxShadow: "inset 0 0 30px rgba(0,0,0,0.65)",
+          overflow: "hidden"
+        }
+      },
       h(
         "div",
         {
           className: "card-header",
           style: {
-            padding: "20px 24px",
-            borderBottom: "1px solid rgba(255,255,255,0.05)",
+            padding: "18px 24px",
+            background: "rgba(13, 19, 29, 0.9)",
+            borderBottom: "1px solid rgba(255,255,255,0.06)",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
           },
         },
-        h("div", { className: "card-title", style: { fontSize: "15px", fontWeight: "700" } }, "Live Traffic Telemetry"),
+        h(
+          "div",
+          null,
+          h(
+            "div",
+            {
+              style: {
+                fontSize: "9px",
+                fontFamily: "var(--font-mono)",
+                color: "var(--neon-cyan)",
+                letterSpacing: "1.5px",
+                fontWeight: "700",
+                marginBottom: "2px"
+              }
+            },
+            "REAL-TIME WIRE THROUGHPUT // 4-CHANNEL"
+          ),
+          h("div", { className: "card-title", style: { fontSize: "16px", fontWeight: "800" } }, "Live Traffic Telemetry")
+        ),
         h(
           "div",
           {
             style: {
               fontSize: "10px",
+              fontFamily: "var(--font-mono)",
               fontWeight: "800",
               letterSpacing: "1px",
-              padding: "4px 10px",
+              padding: "4px 12px",
               borderRadius: "20px",
-              background: isRunning ? "rgba(0, 229, 255, 0.1)" : "rgba(255,255,255,0.05)",
+              background: isRunning ? "rgba(0, 229, 255, 0.12)" : "rgba(255,255,255,0.04)",
               color: isRunning ? "var(--neon-cyan)" : "var(--text-muted)",
-              border: "1px solid " + (isRunning ? "rgba(0, 229, 255, 0.4)" : "transparent"),
+              border: "1px solid " + (isRunning ? "rgba(0, 229, 255, 0.4)" : "rgba(255,255,255,0.08)"),
               boxShadow: isRunning ? "var(--shadow-glow-cyan)" : "none",
             },
           },
-          isRunning ? "ACTIVE STREAM" : "STANDBY"
+          isRunning ? "● ACTIVE STREAM" : "○ STANDBY"
         )
       ),
-      h(
-        "div",
-        { style: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px", padding: "24px" } },
-        h(
-          "div",
-          {
-            style: {
-              background: "rgba(0,0,0,0.2)",
-              border: "1px solid rgba(255,255,255,0.05)",
-              borderRadius: "8px",
-              padding: "16px",
-              display: "flex",
-              flexDirection: "column",
-              gap: "8px",
-            },
-          },
-          h(
-            "span",
-            { style: { fontSize: "10px", color: "var(--text-muted)", fontFamily: "var(--font-mono)", letterSpacing: "1px", fontWeight: "700" } },
-            "PACKETS CAPTURED"
-          ),
-          h(
-            "strong",
-            {
-              style: {
-                fontSize: "24px",
-                color: isRunning ? "var(--neon-cyan)" : "var(--text-primary)",
-                fontFamily: "var(--font-mono)",
-                fontWeight: "800",
-                textShadow: isRunning ? "var(--shadow-glow-cyan)" : "none",
-              },
-            },
-            currentPackets.toLocaleString()
-          )
-        ),
-        h(
-          "div",
-          {
-            style: {
-              background: "rgba(0,0,0,0.2)",
-              border: "1px solid rgba(255,255,255,0.05)",
-              borderRadius: "8px",
-              padding: "16px",
-              display: "flex",
-              flexDirection: "column",
-              gap: "8px",
-            },
-          },
-          h(
-            "span",
-            { style: { fontSize: "10px", color: "var(--text-muted)", fontFamily: "var(--font-mono)", letterSpacing: "1px", fontWeight: "700" } },
-            "DATA VOLUME"
-          ),
-          h(
-            "strong",
-            {
-              style: {
-                fontSize: "24px",
-                color: isRunning ? "var(--neon-cyan)" : "var(--text-primary)",
-                fontFamily: "var(--font-mono)",
-                fontWeight: "800",
-                textShadow: isRunning ? "var(--shadow-glow-cyan)" : "none",
-              },
-            },
-            String(currentBytes) + " ",
-            h("span", { style: { fontSize: "14px", color: "var(--text-muted)" } }, "KB")
-          )
-        ),
-        h(
-          "div",
-          {
-            style: {
-              background: "rgba(0,0,0,0.2)",
-              border: "1px solid rgba(255,255,255,0.05)",
-              borderRadius: "8px",
-              padding: "16px",
-              display: "flex",
-              flexDirection: "column",
-              gap: "8px",
-            },
-          },
-          h(
-            "span",
-            { style: { fontSize: "10px", color: "var(--text-muted)", fontFamily: "var(--font-mono)", letterSpacing: "1px", fontWeight: "700" } },
-            "ESP FLOWS"
-          ),
-          h(
-            "strong",
-            {
-              style: {
-                fontSize: "24px",
-                color: isRunning ? "var(--neon-cyan)" : "var(--text-primary)",
-                fontFamily: "var(--font-mono)",
-                fontWeight: "800",
-                textShadow: isRunning ? "var(--shadow-glow-cyan)" : "none",
-              },
-            },
-            flows
-          )
-        ),
-        h(
-          "div",
-          {
-            style: {
-              background: "rgba(0,0,0,0.2)",
-              border: "1px solid rgba(255,255,255,0.05)",
-              borderRadius: "8px",
-              padding: "16px",
-              display: "flex",
-              flexDirection: "column",
-              gap: "8px",
-            },
-          },
-          h(
-            "span",
-            { style: { fontSize: "10px", color: "var(--text-muted)", fontFamily: "var(--font-mono)", letterSpacing: "1px", fontWeight: "700" } },
-            "CAPTURE RATE"
-          ),
-          h(
-            "strong",
-            {
-              style: {
-                fontSize: "24px",
-                color: isRunning ? "var(--neon-cyan)" : "var(--text-primary)",
-                fontFamily: "var(--font-mono)",
-                fontWeight: "800",
-                textShadow: isRunning ? "var(--shadow-glow-cyan)" : "none",
-              },
-            },
-            isRunning ? String((fullPkts / Math.max(1, Number(duration))).toFixed(1)) + " " : "0.0 ",
-            h("span", { style: { fontSize: "14px", color: "var(--text-muted)" } }, "pkt/s")
-          )
-        )
-      ),
+
+      // 4-Column Metric Strip
       h(
         "div",
         {
           style: {
-            height: "140px",
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+            gap: "16px",
+            padding: "22px 24px"
+          }
+        },
+        ...telemetryCards.map((tc) =>
+          h(
+            "div",
+            {
+              key: tc.code,
+              style: {
+                background: "rgba(0,0,0,0.35)",
+                border: "1px solid rgba(255,255,255,0.06)",
+                borderLeft: `3px solid ${tc.color}`,
+                borderRadius: "8px",
+                padding: "16px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+                boxShadow: "inset 0 0 15px rgba(0,0,0,0.5)"
+              }
+            },
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+              h(
+                "span",
+                {
+                  style: {
+                    fontSize: "10px",
+                    color: "var(--text-muted)",
+                    fontFamily: "var(--font-mono)",
+                    letterSpacing: "1px",
+                    fontWeight: "700"
+                  }
+                },
+                tc.label
+              ),
+              h(
+                "span",
+                {
+                  style: {
+                    fontSize: "9px",
+                    fontFamily: "var(--font-mono)",
+                    color: tc.color,
+                    opacity: 0.7
+                  }
+                },
+                tc.code
+              )
+            ),
+            h(
+              "strong",
+              {
+                style: {
+                  fontSize: "26px",
+                  color: isRunning ? tc.color : "var(--text-primary)",
+                  fontFamily: "var(--font-mono)",
+                  fontWeight: "800",
+                  textShadow: isRunning ? `0 0 12px ${tc.color}50` : "none"
+                }
+              },
+              tc.val,
+              " ",
+              h("span", { style: { fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" } }, tc.unit)
+            )
+          )
+        )
+      ),
+
+      // Main 140px Oscilloscope Viewport
+      h(
+        "div",
+        {
+          style: {
+            height: "145px",
             margin: "0 24px 24px 24px",
-            background: "rgba(0,0,0,0.4)",
-            border: "1px solid rgba(255,255,255,0.05)",
+            background: "#080c11",
+            border: "1px solid rgba(0, 229, 255, 0.18)",
             borderRadius: "8px",
             position: "relative",
             overflow: "hidden",
-            boxShadow: "inset 0 0 20px rgba(0,0,0,0.6)",
+            boxShadow: "inset 0 0 25px rgba(0,0,0,0.85)",
           },
         },
         h("div", {
@@ -1689,10 +1889,25 @@ export default function LiveCaptureView({
             position: "absolute",
             inset: 0,
             backgroundImage:
-              "linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)",
+              "linear-gradient(rgba(0, 229, 255, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 229, 255, 0.035) 1px, transparent 1px)",
             backgroundSize: "20px 20px",
           },
         }),
+        h(
+          "div",
+          {
+            style: {
+              position: "absolute",
+              top: "10px",
+              left: "14px",
+              fontFamily: "var(--font-mono)",
+              fontSize: "10px",
+              color: "var(--text-muted)",
+              letterSpacing: "1px"
+            }
+          },
+          `CHANNEL 01 // ${trafficType.toUpperCase()} PAYLOAD WAVEFORM`
+        ),
         h(
           "svg",
           {
@@ -1702,33 +1917,28 @@ export default function LiveCaptureView({
             preserveAspectRatio: "none",
             style: { position: "absolute", bottom: 0 },
           },
-          isRunning
-            ? [
-                h("polyline", {
-                  key: "fill",
-                  fill: "rgba(0, 229, 255, 0.1)",
-                  stroke: "none",
-                  points: mainGraphFillPoints,
-                }),
-                h("polyline", {
-                  key: "line",
-                  fill: "none",
-                  stroke: "var(--neon-cyan)",
-                  strokeWidth: "2",
-                  points: mainGraphLinePoints,
-                  style: { filter: "drop-shadow(0 0 5px rgba(0,229,255,0.6))" },
-                }),
-              ]
-            : null
+          h("polyline", {
+            fill: isRunning ? "rgba(0, 229, 255, 0.12)" : "rgba(0, 229, 255, 0.03)",
+            stroke: "none",
+            points: mainGraphFillPoints,
+          }),
+          h("polyline", {
+            fill: "none",
+            stroke: isRunning ? "var(--neon-cyan)" : "rgba(0, 229, 255, 0.35)",
+            strokeWidth: "2",
+            points: mainGraphLinePoints,
+            style: { filter: isRunning ? "drop-shadow(0 0 6px rgba(0,229,255,0.7))" : "none" },
+          })
         )
       )
     ),
 
-    // 6. BOTTOM ROW: Console & Export
+    // 6. BOTTOM ROW: Console & Acquired Evidence Cartridge
     h(
       "div",
       { style: { display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: "24px" } },
-      // Terminal (VS Code Style)
+
+      // Left: Terminal Console
       h(
         "div",
         {
@@ -1736,9 +1946,11 @@ export default function LiveCaptureView({
           style: {
             display: "flex",
             flexDirection: "column",
-            height: "300px",
-            background: "#0a0f14",
-            border: "1px solid rgba(255, 170, 0, 0.2)",
+            height: "315px",
+            background: "#080c11",
+            border: "1px solid rgba(255, 170, 0, 0.25)",
+            boxShadow: "inset 0 0 25px rgba(0,0,0,0.85)",
+            overflow: "hidden"
           },
         },
         h(
@@ -1749,16 +1961,31 @@ export default function LiveCaptureView({
               alignItems: "center",
               padding: "10px 16px",
               background: "#131822",
-              borderBottom: "1px solid rgba(255,255,255,0.05)",
+              borderBottom: "1px solid rgba(255,255,255,0.06)",
               justifyContent: "space-between",
             },
           },
           h(
             "div",
-            { style: { display: "flex", gap: "6px" } },
-            h("div", { style: { width: "10px", height: "10px", borderRadius: "50%", background: "#ff5f56" } }),
-            h("div", { style: { width: "10px", height: "10px", borderRadius: "50%", background: "#ffbd2e" } }),
-            h("div", { style: { width: "10px", height: "10px", borderRadius: "50%", background: "#27c93f" } })
+            { style: { display: "flex", alignItems: "center", gap: "12px" } },
+            h(
+              "div",
+              { style: { display: "flex", gap: "6px" } },
+              h("div", { style: { width: "10px", height: "10px", borderRadius: "50%", background: "#ff5f56" } }),
+              h("div", { style: { width: "10px", height: "10px", borderRadius: "50%", background: "#ffbd2e" } }),
+              h("div", { style: { width: "10px", height: "10px", borderRadius: "50%", background: "#27c93f" } })
+            ),
+            h(
+              "span",
+              {
+                style: {
+                  fontSize: "11px",
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--text-muted)"
+                }
+              },
+              "espect-capture-daemon — event.log"
+            )
           ),
           h(
             "div",
@@ -1767,11 +1994,11 @@ export default function LiveCaptureView({
                 fontSize: "10px",
                 color: isRunning ? "var(--neon-orange)" : "var(--text-muted)",
                 fontFamily: "var(--font-mono)",
-                fontWeight: "700",
+                fontWeight: "800",
                 letterSpacing: "1px",
               },
             },
-            isRunning ? "RECORDING EVENT LOG..." : "IDLE"
+            isRunning ? "● RECORDING EVENT LOG..." : "○ IDLE"
           )
         ),
         h(
@@ -1791,110 +2018,174 @@ export default function LiveCaptureView({
           },
           [...logs].reverse().map((entry, index) => {
             let color = "var(--text-secondary)";
-            if (entry.includes("PASS") || entry.includes("successful")) color = "var(--emerald-400)";
-            if (entry.includes("Error") || entry.includes("Halting")) color = "var(--neon-red)";
-            if (entry.includes("Injecting")) color = "var(--neon-purple)";
+            if (entry.includes("PASS") || entry.includes("successful") || entry.includes("complete")) color = "var(--emerald-400)";
+            if (entry.includes("Error") || entry.includes("Halting") || entry.includes("blocked")) color = "var(--neon-red)";
+            if (entry.includes("Injecting") || entry.includes("Slicing")) color = "var(--neon-purple)";
 
             return h(
               "div",
-              { key: entry + "-" + String(index), style: { marginBottom: "4px" } },
+              { key: entry + "-" + String(index), style: { marginBottom: "6px" } },
               h("span", { style: { color, textShadow: "0 0 5px " + color + "40" } }, entry)
             );
           })
         )
       ),
 
-      // Acquired Evidence Card
+      // Right: Acquired Evidence Cartridge Card
       h(
         "div",
         {
           className: "card",
-          style: { padding: "24px", display: "flex", flexDirection: "column", justifyContent: "space-between" },
+          style: {
+            padding: "24px",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "space-between",
+            border: "1px solid rgba(0, 255, 163, 0.25)",
+            boxShadow: "inset 0 0 30px rgba(0,0,0,0.65)"
+          },
         },
         h(
           "div",
           null,
           h(
             "div",
-            { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" } },
-            h("div", { className: "card-title", style: { fontSize: "15px", fontWeight: "700" } }, "Acquired Evidence"),
+            { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "18px" } },
+            h(
+              "div",
+              null,
+              h(
+                "div",
+                {
+                  style: {
+                    fontSize: "9px",
+                    fontFamily: "var(--font-mono)",
+                    color: "var(--emerald-400)",
+                    letterSpacing: "1.5px",
+                    fontWeight: "700",
+                    marginBottom: "2px"
+                  }
+                },
+                "LIBPCAP BINARY BUFFER"
+              ),
+              h("div", { className: "card-title", style: { fontSize: "16px", fontWeight: "800" } }, "Acquired Evidence")
+            ),
             h(
               "div",
               {
                 style: {
                   fontSize: "10px",
+                  fontFamily: "var(--font-mono)",
                   fontWeight: "800",
                   letterSpacing: "1px",
                   padding: "4px 10px",
                   borderRadius: "20px",
                   background: isRunning ? "rgba(0, 229, 255, 0.1)" : "rgba(0, 255, 163, 0.1)",
                   color: isRunning ? "var(--neon-cyan)" : "var(--emerald-400)",
-                  border: "1px solid " + (isRunning ? "rgba(0, 229, 255, 0.3)" : "rgba(0, 255, 163, 0.3)"),
+                  border: "1px solid " + (isRunning ? "rgba(0, 229, 255, 0.35)" : "rgba(0, 255, 163, 0.35)"),
                   boxShadow: isRunning ? "var(--shadow-glow-cyan)" : "var(--shadow-glow-emerald)",
                 },
               },
-              isRunning ? "WRITING (" + String(generatedPercent) + "%)" : "READY (" + String(generatedPercent) + "%)"
+              isRunning ? "● WRITING (" + String(generatedPercent) + "%)" : "● READY (" + String(generatedPercent) + "%)"
             )
           ),
+
+          // Cartridge Box
           h(
             "div",
             {
               style: {
                 display: "flex",
-                alignItems: "center",
-                gap: "16px",
-                padding: "20px",
-                background: "rgba(0,0,0,0.2)",
-                border: "1px solid rgba(255,255,255,0.05)",
+                flexDirection: "column",
+                gap: "12px",
+                padding: "16px",
+                background: "rgba(0,0,0,0.35)",
+                border: "1px solid rgba(255,255,255,0.06)",
+                borderLeft: "3px solid var(--emerald-400)",
                 borderRadius: "8px",
               },
             },
             h(
               "div",
-              {
-                style: {
-                  width: "48px",
-                  height: "48px",
-                  borderRadius: "12px",
-                  background: "rgba(0, 255, 163, 0.1)",
-                  border: "1px solid rgba(0, 255, 163, 0.3)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: "20px",
-                  color: "var(--emerald-400)",
-                  boxShadow: "var(--shadow-glow-emerald)",
-                },
-              },
-              "▣"
-            ),
-            h(
-              "div",
-              null,
+              { style: { display: "flex", alignItems: "center", gap: "14px" } },
               h(
-                "strong",
+                "div",
                 {
                   style: {
-                    display: "block",
+                    width: "44px",
+                    height: "44px",
+                    borderRadius: "10px",
+                    background: "rgba(0, 255, 163, 0.1)",
+                    border: "1px solid rgba(0, 255, 163, 0.35)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "12px",
                     fontFamily: "var(--font-mono)",
-                    color: "var(--text-primary)",
-                    fontSize: "14px",
-                    marginBottom: "4px",
+                    fontWeight: "800",
+                    color: "var(--emerald-400)",
+                    boxShadow: "var(--shadow-glow-emerald)",
+                    flexShrink: 0
                   },
                 },
-                "capture_live_" + trafficType + ".pcap"
+                "PCAP"
               ),
               h(
-                "span",
-                { style: { display: "block", color: "var(--text-muted)", fontSize: "12px", fontFamily: "var(--font-mono)" } },
-                String(currentBytes) + " KB • " + String(currentPackets) + " packets • " + String(generatedPercent) + "% generated"
+                "div",
+                { style: { minWidth: 0 } },
+                h(
+                  "strong",
+                  {
+                    style: {
+                      display: "block",
+                      fontFamily: "var(--font-mono)",
+                      color: "var(--text-primary)",
+                      fontSize: "14px",
+                      marginBottom: "3px",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis"
+                    },
+                  },
+                  "capture_live_" + trafficType + ".pcap"
+                ),
+                h(
+                  "span",
+                  { style: { display: "block", color: "var(--text-muted)", fontSize: "11px", fontFamily: "var(--font-mono)" } },
+                  String(currentBytes) + " KB • " + String(currentPackets) + " pkts • " + String(generatedPercent) + "% buffered"
+                )
               )
+            ),
+
+            // Live Buffer Fill Progress Bar
+            h(
+              "div",
+              {
+                style: {
+                  width: "100%",
+                  height: "5px",
+                  background: "rgba(255,255,255,0.08)",
+                  borderRadius: "3px",
+                  overflow: "hidden"
+                }
+              },
+              h("div", {
+                style: {
+                  width: `${generatedPercent}%`,
+                  height: "100%",
+                  background: "var(--emerald-400)",
+                  boxShadow: "0 0 8px var(--emerald-400)",
+                  transition: "width 0.3s ease"
+                }
+              })
             )
           )
         ),
+
+        // Bottom Export & Start/Stop Buttons
         h(
           "div",
-          { style: { display: "flex", gap: "12px", marginTop: "24px" } },
+          { style: { display: "flex", gap: "12px", marginTop: "18px" } },
           // EXPORT PCAP BUTTON (Slices PCAP to exact generated % and downloads directly)
           h(
             "button",
@@ -1906,24 +2197,26 @@ export default function LiveCaptureView({
               onMouseLeave: () => setHoveredBtn(null),
               style: {
                 flex: 1,
-                padding: "14px",
+                padding: "13px 10px",
                 position: "relative",
                 overflow: "hidden",
+                fontFamily: "var(--font-mono)",
+                fontSize: "11px",
                 background:
                   exportState === "done"
                     ? "rgba(0, 255, 163, 0.18)"
-                    : "rgba(157, 78, 221, 0.18)",
+                    : "rgba(187, 134, 252, 0.18)",
                 border: "1px solid " + exportBorderColor,
                 color:
                   exportState === "done"
                     ? "var(--emerald-400)"
                     : exportState === "exporting"
                     ? "var(--neon-cyan)"
-                    : "#d8b4fe",
+                    : "#e9d5ff",
                 borderRadius: "6px",
                 fontWeight: "800",
                 textTransform: "uppercase",
-                letterSpacing: "1px",
+                letterSpacing: "0.8px",
                 boxShadow:
                   exportState === "done"
                     ? "var(--shadow-glow-emerald)"
@@ -1948,7 +2241,7 @@ export default function LiveCaptureView({
                 background:
                   exportState === "exporting"
                     ? "linear-gradient(90deg, rgba(0, 229, 255, 0.35), rgba(0, 255, 163, 0.45))"
-                    : "rgba(157, 78, 221, 0.22)",
+                    : "rgba(187, 134, 252, 0.22)",
                 transition: "width 0.1s linear",
                 zIndex: 0,
               },
@@ -1962,7 +2255,7 @@ export default function LiveCaptureView({
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  gap: "8px",
+                  gap: "6px",
                 },
               },
               exportState === "exporting"
@@ -1975,9 +2268,9 @@ export default function LiveCaptureView({
                   })
                 : null,
               exportState === "exporting"
-                ? "Exporting " + String(exportedSnapshotPct) + "% PCAP... (" + String(exportProgress) + "%)"
+                ? "Exporting " + String(exportedSnapshotPct) + "%... (" + String(exportProgress) + "%)"
                 : exportState === "done"
-                ? "✓ Exported (" + String(exportedSnapshotPct) + "% PCAP)"
+                ? "✓ Exported (" + String(exportedSnapshotPct) + "%)"
                 : "⤓ Export PCAP (" + String(generatedPercent) + "%)"
             )
           ),
@@ -1994,14 +2287,16 @@ export default function LiveCaptureView({
               disabled: isMutating && !isRunning,
               style: {
                 flex: 1,
-                padding: "14px",
-                background: isRunning ? "rgba(255, 51, 102, 0.2)" : "rgba(0, 229, 255, 0.18)",
+                padding: "13px 10px",
+                fontFamily: "var(--font-mono)",
+                fontSize: "11px",
+                background: isRunning ? "rgba(255, 51, 102, 0.2)" : "rgba(0, 229, 255, 0.16)",
                 border: "1px solid " + (isRunning ? "var(--neon-red)" : "var(--neon-cyan)"),
                 color: isRunning ? "var(--neon-red)" : "var(--neon-cyan)",
                 borderRadius: "6px",
                 fontWeight: "800",
                 textTransform: "uppercase",
-                letterSpacing: "1px",
+                letterSpacing: "0.8px",
                 boxShadow: isRunning ? "var(--shadow-glow-red)" : "var(--shadow-glow-cyan)",
                 cursor: "pointer",
                 transition: "all 0.25s ease",

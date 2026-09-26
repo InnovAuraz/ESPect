@@ -177,30 +177,6 @@
   appearance: none;
 }
 
-.rail-mark {
-  position: relative;
-  z-index: 1002;
-  pointer-events: auto;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-@media (max-width: 1199px) {
-  .command-rail:not(.open) .rail-mark {
-    position: relative;
-    z-index: 1002;
-    pointer-events: auto;
-    cursor: pointer;
-  }
-
-  .command-rail.open .rail-mark {
-    position: relative;
-    z-index: 1002;
-    pointer-events: auto;
-    cursor: pointer;
-  }
-}
-
 .rail-mark:hover {
   transform: translateY(-2px);
   box-shadow:
@@ -1516,4 +1492,640 @@
   .capture-grid { grid-template-columns: 1fr; }
   .field-grid { grid-template-columns: 1fr; }
   .summary-actions { flex-direction: column; }
+}
+
+/* =========================================================
+   ESPect — AUTHORITATIVE SHELL OVERRIDE
+   Put this block LAST in the stylesheet.
+   It only controls sidebar/workspace geometry.
+   ========================================================= */
+
+/* Prevent padding/borders from changing declared widths. */
+.app-shell,
+.command-rail,
+.workspace,
+.rail-mark,
+.rail-item,
+.rail-item-mark,
+.rail-footer {
+  box-sizing: border-box;
+}
+
+/* ---------------------------------------------------------
+   DESKTOP: 1200px+
+   Sidebar participates in the normal layout.
+   Workspace keeps the original centered content model.
+   --------------------------------------------------------- */
+@media (min-width: 1200px) {
+  .app-shell {
+    display: flex !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 100vh !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .command-rail {
+    position: sticky !important;
+    top: 0 !important;
+    left: auto !important;
+    bottom: auto !important;
+
+    width: 270px !important;
+    min-width: 270px !important;
+    max-width: 270px !important;
+    flex: 0 0 270px !important;
+
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+
+    box-sizing: border-box !important;
+  }
+
+  .workspace {
+    flex: 1 1 auto !important;
+    width: min(1440px, 100%) !important;
+    max-width: 1440px !important;
+    min-width: 0 !important;
+
+    margin: 0 auto !important;
+
+    box-sizing: border-box !important;
+  }
+
+  /* Expanded desktop rail keeps the E as the toggle. */
+  .rail-mark {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+  }
+}
+
+/* ---------------------------------------------------------
+   TABLET: 701px–1199px
+   Closed rail = 80px.
+   Open rail = 270px fixed overlay.
+   Workspace is NOT pushed by the opened rail.
+   --------------------------------------------------------- */
+@media (min-width: 701px) and (max-width: 1199px) {
+  .app-shell {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 100vh !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow-x: clip !important;
+  }
+
+  .workspace,
+  .workspace.sidebar-expanded,
+  .workspace.sidebar-collapsed {
+    width: calc(100% - 72px) !important;
+    max-width: none !important;
+    min-width: 0 !important;
+
+    margin-left: 72px !important;
+
+    box-sizing: border-box !important;
+  }
+
+  .command-rail:not(.open) {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    bottom: 0 !important;
+
+    width: 80px !important;
+    min-width: 80px !important;
+    max-width: 80px !important;
+    flex: 0 0 80px !important;
+
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+
+    padding: 22px 10px 20px !important;
+
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto 1fr auto !important;
+
+    justify-items: center !important;
+
+    box-sizing: border-box !important;
+
+    z-index: 5000 !important;
+  }
+
+  .command-rail:not(.open) .rail-mark {
+    width: 42px !important;
+    height: 42px !important;
+
+    justify-self: center !important;
+    margin-inline: auto !important;
+
+    pointer-events: auto !important;
+    cursor: pointer !important;
+  }
+
+  .command-rail:not(.open) .rail-nav {
+    width: 100% !important;
+
+    justify-items: center !important;
+    align-items: start !important;
+  }
+
+  .command-rail:not(.open) .rail-item {
+    width: 48px !important;
+    max-width: 48px !important;
+    height: 48px !important;
+
+    padding: 0 !important;
+    margin-inline: auto !important;
+
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+
+    box-sizing: border-box !important;
+  }
+
+  .command-rail:not(.open) .rail-item-mark {
+    width: 32px !important;
+    height: 32px !important;
+
+    margin: 0 !important;
+    flex: 0 0 32px !important;
+
+    display: grid !important;
+    place-items: center !important;
+  }
+
+  .command-rail:not(.open) .rail-item.active::after {
+    display: none !important;
+  }
+
+  .command-rail.open {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    bottom: 0 !important;
+
+    width: 270px !important;
+    min-width: 270px !important;
+    max-width: 270px !important;
+    flex: 0 0 270px !important;
+
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+
+    padding: 22px 16px 20px !important;
+
+    grid-template-columns: 42px 1fr !important;
+    grid-template-rows: auto 1fr auto !important;
+
+    box-sizing: border-box !important;
+
+    z-index: 6000 !important;
+  }
+
+  .command-rail.open .rail-mark {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+  }
+
+  .command-rail.open .rail-nav {
+    justify-items: stretch !important;
+  }
+
+  .command-rail.open .rail-item {
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+
+    padding: 11px 14px !important;
+    margin: 0 !important;
+
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+
+    box-sizing: border-box !important;
+  }
+
+  .command-rail.open .rail-item-mark {
+    width: 28px !important;
+    height: 28px !important;
+
+    margin: 0 !important;
+    flex: 0 0 28px !important;
+  }
+}
+
+/* ---------------------------------------------------------
+   MOBILE: <=700px
+   IMPORTANT:
+   - Workspace always stays full viewport width.
+   - Closed rail is 72px.
+   - Open rail is 270px / 86vw max.
+   - Drawer overlays workspace.
+   - Nothing reserves sidebar width.
+   - Collapsed logos are mathematically centered.
+   --------------------------------------------------------- */
+@media (max-width: 700px) {
+  html,
+  body,
+  #root {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  body {
+    overflow-x: hidden !important;
+  }
+
+  .app-shell {
+    display: block !important;
+
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+
+    min-height: 100dvh !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    overflow-x: clip !important;
+  }
+
+  /* THE CENTER FIX:
+     no desktop/tablet margin-left, no calc(100%-sidebar),
+     no flex reservation, no centering against a sidebar. */
+  .workspace,
+  .workspace.sidebar-expanded,
+  .workspace.sidebar-collapsed {
+    width: calc(100% - 72px) !important;
+    max-width: none !important;
+    min-width: 0 !important;
+
+    margin: 0 !important;
+
+    box-sizing: border-box !important;
+  }
+
+  .workspace {
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+
+    margin: 0 !important;
+
+    padding-left: calc(72px + 16px) !important;
+    padding-right: 16px !important;
+
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
+  }
+
+  /* Closed rail */
+  .command-rail:not(.open) {
+    position: fixed !important;
+
+    left: 0 !important;
+    top: 0 !important;
+    right: auto !important;
+    bottom: 0 !important;
+
+    width: 72px !important;
+    min-width: 72px !important;
+    max-width: 72px !important;
+    flex: 0 0 72px !important;
+
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+
+    margin: 0 !important;
+    padding: 18px 8px 16px !important;
+
+    display: grid !important;
+
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto 1fr auto !important;
+
+    justify-items: center !important;
+
+    box-sizing: border-box !important;
+
+    overflow: hidden !important;
+
+    z-index: 6000 !important;
+
+    background:
+      linear-gradient(
+        180deg,
+        rgba(10, 16, 27, 0.72),
+        rgba(5, 10, 18, 0.58)
+      ) !important;
+
+    backdrop-filter: blur(24px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(150%) !important;
+  }
+
+  /* Center the E itself */
+  .command-rail:not(.open) .rail-mark {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+
+    width: 42px !important;
+    height: 42px !important;
+
+    justify-self: center !important;
+    align-self: center !important;
+
+    margin: 0 auto !important;
+
+    pointer-events: auto !important;
+    cursor: pointer !important;
+  }
+
+  /* Hide text in collapsed rail */
+  .command-rail:not(.open) .rail-brand,
+  .command-rail:not(.open) .rail-item-label,
+  .command-rail:not(.open) .rail-footer span {
+    display: none !important;
+  }
+
+  /* Center the entire navigation column */
+  .command-rail:not(.open) .rail-nav {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+
+    width: 100% !important;
+
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+
+    justify-self: stretch !important;
+
+    display: grid !important;
+    justify-items: center !important;
+    align-items: start !important;
+  }
+
+  /* Center every navigation button */
+  .command-rail:not(.open) .rail-item {
+    width: 48px !important;
+    max-width: 48px !important;
+
+    height: 48px !important;
+
+    min-width: 48px !important;
+
+    margin-left: auto !important;
+    margin-right: auto !important;
+
+    padding: 0 !important;
+
+    display: flex !important;
+
+    align-items: center !important;
+    justify-content: center !important;
+
+    box-sizing: border-box !important;
+  }
+
+  /* Center the actual icon */
+  .command-rail:not(.open) .rail-item-mark {
+    width: 32px !important;
+    height: 32px !important;
+
+    min-width: 32px !important;
+    max-width: 32px !important;
+
+    margin: 0 !important;
+
+    flex: 0 0 32px !important;
+
+    display: grid !important;
+    place-items: center !important;
+
+    box-sizing: border-box !important;
+  }
+
+  /* Active dot must not push the icon sideways */
+  .command-rail:not(.open) .rail-item.active::after {
+    display: none !important;
+  }
+
+  /* Footer is centered too */
+  .command-rail:not(.open) .rail-footer {
+    grid-column: 1 !important;
+    grid-row: 3 !important;
+
+    width: 44px !important;
+    max-width: 44px !important;
+
+    height: 44px !important;
+
+    margin-left: auto !important;
+    margin-right: auto !important;
+
+    padding: 0 !important;
+
+    display: grid !important;
+    place-items: center !important;
+
+    box-sizing: border-box !important;
+
+    font-size: 0 !important;
+  }
+
+  .command-rail:not(.open) .rail-footer::before {
+    position: static !important;
+    transform: none !important;
+  }
+
+  /* Open glass drawer */
+  .command-rail.open {
+    position: fixed !important;
+
+    left: 0 !important;
+    top: 0 !important;
+    right: auto !important;
+    bottom: 0 !important;
+
+    width: min(270px, 86vw) !important;
+    min-width: min(270px, 86vw) !important;
+    max-width: min(270px, 86vw) !important;
+
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+
+    margin: 0 !important;
+    padding: 22px 16px 20px !important;
+
+    display: grid !important;
+
+    grid-template-columns: 42px 1fr !important;
+    grid-template-rows: auto 1fr auto !important;
+
+    box-sizing: border-box !important;
+
+    overflow: hidden !important;
+
+    z-index: 7000 !important;
+
+    background:
+      linear-gradient(
+        180deg,
+        rgba(10, 16, 27, 0.60),
+        rgba(5, 10, 18, 0.48)
+      ) !important;
+
+    backdrop-filter: blur(30px) saturate(165%) !important;
+    -webkit-backdrop-filter: blur(30px) saturate(165%) !important;
+
+    border-right: 1px solid rgba(0, 229, 255, 0.20) !important;
+
+    box-shadow:
+      18px 0 60px rgba(0, 0, 0, 0.62),
+      inset -1px 0 0 rgba(255, 255, 255, 0.055) !important;
+  }
+
+  /* E MUST remain the toggle when drawer is open,
+     otherwise there is no way to collapse the drawer. */
+  .command-rail.open .rail-mark {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+    justify-self: center !important;
+  }
+
+  .command-rail.open .rail-nav {
+    grid-column: 1 / -1 !important;
+    grid-row: 2 !important;
+
+    width: 100% !important;
+
+    justify-items: stretch !important;
+  }
+
+  .command-rail.open .rail-item {
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+
+    margin: 0 !important;
+    padding: 11px 14px !important;
+
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+
+    box-sizing: border-box !important;
+  }
+
+  .command-rail.open .rail-item-mark {
+    width: 28px !important;
+    height: 28px !important;
+
+    min-width: 28px !important;
+    margin: 0 !important;
+
+    flex: 0 0 28px !important;
+  }
+}
+
+/* =========================================================
+   GLASSMORPHISM FIX ONLY
+   No existing layout, sizing, spacing, content, or behavior
+   rules above are removed or rewritten.
+   ========================================================= */
+
+/* Base / desktop sidebar:
+   The old rgba(0.92) surface was too opaque for glass to be
+   visually apparent. Keep the same geometry and strengthen
+   only transparency + backdrop treatment. */
+.command-rail {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(10, 16, 27, 0.48),
+      rgba(5, 10, 18, 0.34)
+    ) !important;
+
+  backdrop-filter: blur(28px) saturate(165%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(165%) !important;
+
+  border-right-color: rgba(255, 255, 255, 0.12) !important;
+
+  box-shadow:
+    8px 0 32px rgba(0, 0, 0, 0.38),
+    inset -1px 0 0 rgba(255, 255, 255, 0.045) !important;
+
+  isolation: isolate;
+  background-clip: padding-box;
+}
+
+/* Tablet expanded drawer:
+   The previous rgba(0.98) made this state effectively opaque. */
+@media (min-width: 701px) and (max-width: 1199px) {
+  .command-rail.open {
+    background:
+      linear-gradient(
+        180deg,
+        rgba(10, 16, 27, 0.42),
+        rgba(5, 10, 18, 0.30)
+      ) !important;
+
+    backdrop-filter: blur(32px) saturate(175%) !important;
+    -webkit-backdrop-filter: blur(32px) saturate(175%) !important;
+
+    border-right-color: rgba(0, 229, 255, 0.22) !important;
+
+    box-shadow:
+      18px 0 60px rgba(0, 0, 0, 0.54),
+      inset -1px 0 0 rgba(255, 255, 255, 0.06) !important;
+  }
+}
+
+/* Mobile closed rail:
+   Keep the existing width/position/icon rules completely intact. */
+@media (max-width: 700px) {
+  .command-rail:not(.open) {
+    background:
+      linear-gradient(
+        180deg,
+        rgba(10, 16, 27, 0.48),
+        rgba(5, 10, 18, 0.34)
+      ) !important;
+
+    backdrop-filter: blur(30px) saturate(170%) !important;
+    -webkit-backdrop-filter: blur(30px) saturate(170%) !important;
+
+    border-right-color: rgba(255, 255, 255, 0.11) !important;
+
+    box-shadow:
+      12px 0 40px rgba(0, 0, 0, 0.44),
+      inset -1px 0 0 rgba(255, 255, 255, 0.045) !important;
+  }
+
+  /* Mobile open drawer */
+  .command-rail.open {
+    background:
+      linear-gradient(
+        180deg,
+        rgba(10, 16, 27, 0.38),
+        rgba(5, 10, 18, 0.26)
+      ) !important;
+
+    backdrop-filter: blur(34px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(34px) saturate(180%) !important;
+
+    border-right-color: rgba(0, 229, 255, 0.24) !important;
+
+    box-shadow:
+      20px 0 64px rgba(0, 0, 0, 0.58),
+      inset -1px 0 0 rgba(255, 255, 255, 0.065) !important;
+  }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 
 import {
@@ -29,10 +29,10 @@ import SecurityFindings from "./components/SecurityFindings";
 import ReportButton from "./components/ReportButton";
 import EmptyState from "./components/EmptyState";
 import LiveCaptureView from "./components/LiveCaptureView";
-
-// NEW IMPORTS
 import StartupGuide from "./components/StartupGuide";
 import SystemInternals from "./components/SystemInternals";
+
+const h = React.createElement;
 
 const navItems = [
   { id: "overview", label: "Overview", icon: "◈" },
@@ -42,6 +42,27 @@ const navItems = [
   { id: "startup-guide", label: "Startup Guide", icon: "⎈" },
   { id: "system-internals", label: "System Internals", icon: "⌗" },
 ];
+
+const viewMeta = {
+  "overview": {
+    eyebrow: "IPSEC / ENCRYPTED TRAFFIC INTELLIGENCE",
+    title: "Analysis Command Center",
+    subtitle: "Decode observable VPN behavior, inspect tunnel posture, and preserve the evidence boundary.",
+    badge: "CORE ENGINE"
+  },
+  "protocol-scan": {
+    eyebrow: "DEEP PACKET INSPECTION & TOPOLOGY",
+    title: "Protocol Scan & Encapsulation",
+    subtitle: "Cryptographic tunnel encapsulation, endpoint telemetry, and layer-by-layer protocol distribution.",
+    badge: "DPI SCANNER"
+  },
+  "risk-findings": {
+    eyebrow: "VULNERABILITY & ANOMALY AUDIT",
+    title: "Threat Matrix & Risk Findings",
+    subtitle: "Automated cryptographic weakness detection, cleartext exposure alerts, and security posture scoring.",
+    badge: "THREAT ENGINE"
+  }
+};
 
 function App() {
   const [backendStatus, setBackendStatus] = useState("checking");
@@ -53,9 +74,11 @@ function App() {
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [reportError, setReportError] = useState(null);
   const [activeView, setActiveView] = useState("overview");
-  const [isRailCollapsed, setIsRailCollapsed] = useState(typeof window !== "undefined" && window.innerWidth <= 1200);
+  const [isRailCollapsed, setIsRailCollapsed] = useState(
+    typeof window !== "undefined" && 1200 >= window.innerWidth
+  );
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  
+
   const [captureSession, setCaptureSession] = useState(null);
   const [captureError, setCaptureError] = useState(null);
   const [isLoadingCapture, setIsLoadingCapture] = useState(false);
@@ -91,7 +114,7 @@ function App() {
 
   useEffect(() => {
     function handleRailResize() {
-      if (window.innerWidth <= 1200) {
+      if (1200 >= window.innerWidth) {
         setIsRailCollapsed(true);
       } else {
         setIsRailCollapsed(false);
@@ -99,9 +122,7 @@ function App() {
     }
 
     handleRailResize();
-
     window.addEventListener("resize", handleRailResize);
-
     return () => {
       window.removeEventListener("resize", handleRailResize);
     };
@@ -110,10 +131,18 @@ function App() {
   useEffect(() => {
     let ignore = false;
     checkHealth()
-      .then(() => { if (!ignore) setBackendStatus("online"); })
-      .catch(() => { if (!ignore) setBackendStatus("offline"); })
-      .finally(() => { if (!ignore) setIsCheckingHealth(false); });
-    return () => { ignore = true; };
+      .then(() => {
+        if (!ignore) setBackendStatus("online");
+      })
+      .catch(() => {
+        if (!ignore) setBackendStatus("offline");
+      })
+      .finally(() => {
+        if (!ignore) setIsCheckingHealth(false);
+      });
+    return () => {
+      ignore = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -129,48 +158,6 @@ function App() {
       window.clearInterval(intervalId);
     };
   }, [activeView, refreshCaptureSession]);
-
-  // useEffect(() => {
-  //   if (
-  //     activeView !== "live-capture" ||
-  //     !captureRunRequested.current ||
-  //     captureSession?.capture_status !== "completed" ||
-  //     autoAnalyzedCapture.current
-  //   ) {
-  //     return undefined;
-  //   }
-
-  //   autoAnalyzedCapture.current = true;
-  //   let cancelled = false;
-
-  //   async function analyzeCompletedCapture() {
-  //     setIsAnalyzing(true);
-  //     setCaptureError(null);
-  //     try {
-  //       const result = await analyzeLiveCapture();
-  //       if (cancelled) return;
-
-  //       const { blob, filename } = await downloadCaptureSession();
-  //       const file = new File([blob], filename, { type: "application/vnd.tcpdump.pcap" });
-        
-  //       setSelectedFile(file);
-  //       setAnalysisResult(result);
-  //       setActiveView("overview");
-  //     } catch (error) {
-  //       if (!cancelled) {
-  //         autoAnalyzedCapture.current = false;
-  //         setCaptureError(error.message || "Automatic PCAP analysis failed.");
-  //       }
-  //     } finally {
-  //       if (!cancelled) setIsAnalyzing(false);
-  //     }
-  //   }
-
-  //   void analyzeCompletedCapture();
-  //   return () => {
-  //     cancelled = true;
-  //   };
-  // }, [activeView, captureSession?.capture_status]);
 
   async function handleCaptureAction(action, options = {}) {
     setIsMutatingCapture(true);
@@ -209,34 +196,28 @@ function App() {
   }
 
   async function handleAnalyzeLiveCapture() {
-  if (isAnalyzing) return;
+    if (isAnalyzing) return;
 
-  setIsAnalyzing(true);
-  setCaptureError(null);
-  setAnalysisError(null);
+    setIsAnalyzing(true);
+    setCaptureError(null);
+    setAnalysisError(null);
 
-  try {
-    const result = await analyzeLiveCapture();
+    try {
+      const result = await analyzeLiveCapture();
+      const { blob, filename } = await downloadCaptureSession();
+      const file = new File([blob], filename, {
+        type: "application/vnd.tcpdump.pcap",
+      });
 
-    const { blob, filename } = await downloadCaptureSession();
-
-    const file = new File(
-      [blob],
-      filename,
-      { type: "application/vnd.tcpdump.pcap" }
-    );
-
-    setSelectedFile(file);
-    setAnalysisResult(result);
-    setActiveView("overview");
-  } catch (error) {
-    setAnalysisError(
-      error.message || "Live PCAP analysis failed."
-    );
-  } finally {
-    setIsAnalyzing(false);
+      setSelectedFile(file);
+      setAnalysisResult(result);
+      setActiveView("overview");
+    } catch (error) {
+      setAnalysisError(error.message || "Live PCAP analysis failed.");
+    } finally {
+      setIsAnalyzing(false);
+    }
   }
-}
 
   function handleFileSelected(file) {
     setSelectedFile(file);
@@ -289,125 +270,345 @@ function App() {
   }
 
   const r = analysisResult;
+  const currentMeta = viewMeta[activeView] || viewMeta["overview"];
+  const isOnline = backendStatus === "online";
+  const statusColor = isOnline ? "var(--emerald-400)" : "var(--neon-orange)";
+  const statusGlow = isOnline ? "var(--shadow-glow-emerald)" : "var(--shadow-glow-amber)";
 
-  return (
-    <div className="app-shell">
-      <aside className={`command-rail ${sidebarOpen ? "open" : ""}`}>
-        <button
-          type="button"
-          className="rail-mark"
-          onClick={() => setSidebarOpen((value) => !value)}
-          aria-label={sidebarOpen ? "collapse sidebar" : "Expand sidebar"}
-        >
-          E
-        </button>
-        <div className="rail-brand">ESPECT<span>OPS CONSOLE</span></div>
-        <nav className="rail-nav" aria-label="Primary navigation">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`rail-item ${activeView === item.id ? "active" : ""}`}
-              onClick={() => {
+  return h(
+    "div",
+    { className: "app-shell" },
+
+    // SIDEBAR NAVIGATION
+    h(
+      "aside",
+      { className: `command-rail ${sidebarOpen ? "open" : ""}` },
+      h(
+        "button",
+        {
+          type: "button",
+          className: "rail-mark",
+          onClick: () => setSidebarOpen((value) => !value),
+          "aria-label": sidebarOpen ? "collapse sidebar" : "Expand sidebar",
+        },
+        "E"
+      ),
+      h("div", { className: "rail-brand" }, "ESPECT", h("span", null, "OPS CONSOLE")),
+      h(
+        "nav",
+        { className: "rail-nav", "aria-label": "Primary navigation" },
+        ...navItems.map((item) =>
+          h(
+            "button",
+            {
+              key: item.id,
+              type: "button",
+              className: `rail-item ${activeView === item.id ? "active" : ""}`,
+              onClick: () => {
                 setActiveView(item.id);
+                setSidebarOpen(false);
                 if (item.id === "live-capture") {
                   void refreshCaptureSession();
                 }
-              }}
-            >
-              <span className="rail-item-mark" aria-hidden="true">{item.icon}</span>
-              <span className="rail-item-label">{item.label}</span>
-            </button>
-          ))}
-        </nav>
-        <div className="rail-footer">PCAP-FIRST<br /><span>ANALYSIS NODE 01</span></div>
-      </aside>
+              },
+            },
+            h("span", { className: "rail-item-mark", "aria-hidden": "true" }, item.icon),
+            h("span", { className: "rail-item-label" }, item.label)
+          )
+        )
+      ),
+      h(
+        "div",
+        { className: "rail-footer" },
+        "PCAP-FIRST",
+        h("br"),
+        h("span", null, "ANALYSIS NODE 01")
+      )
+    ),
 
-      <main className="workspace">
-        {activeView === "live-capture" ? (
-          <LiveCaptureView
-            session={captureSession}
-            captureError={captureError}
-            isLoading={isLoadingCapture}
-            isMutating={isMutatingCapture}
-            onStartCapture={(options) => handleCaptureAction("start", options)}
-            onStopCapture={() => handleCaptureAction("stop")}
-            onDownload={handleDownloadCapture}
-            onAnalyze={handleAnalyzeLiveCapture}
-          />
-        ) : activeView === "startup-guide" ? (
-          <StartupGuide />
-        ) : activeView === "system-internals" ? (
-          <SystemInternals />
-        ) : (
-          <>
-            <Header
-              status={backendStatus}
-              onRefresh={refreshBackendStatus}
-              isChecking={isCheckingHealth}
-            />
+    // MAIN WORKSPACE
+    h(
+      "main",
+      { className: "workspace" },
+      activeView === "live-capture"
+        ? h(LiveCaptureView, {
+            session: captureSession,
+            captureError: captureError,
+            isLoading: isLoadingCapture,
+            isMutating: isMutatingCapture,
+            onStartCapture: (options) => handleCaptureAction("start", options),
+            onStopCapture: () => handleCaptureAction("stop"),
+            onDownload: handleDownloadCapture,
+            onAnalyze: handleAnalyzeLiveCapture,
+          })
+        : activeView === "startup-guide"
+        ? h(StartupGuide)
+        : activeView === "system-internals"
+        ? h(SystemInternals)
+        : h(
+            React.Fragment,
+            null,
+            h(Header, {
+              status: backendStatus,
+              onRefresh: refreshBackendStatus,
+              isChecking: isCheckingHealth,
+            }),
 
-            <section className="mission-bar">
-              <div>
-                <div className="eyebrow">IPSEC / ENCRYPTED TRAFFIC INTELLIGENCE</div>
-                <h1>Analysis command center</h1>
-                <p>Decode observable VPN behavior. Preserve the evidence boundary.</p>
-              </div>
-              <div className="mission-state">
-                <span className={`status-dot ${backendStatus === "online" ? "online" : "checking"}`} />
-                <span>ANALYZER NODE</span>
-                <strong>{backendStatus === "online" ? "READY" : "STANDBY"}</strong>
-              </div>
-            </section>
+            // UPGRADED SYSTEM-INTERNALS STYLE COMMAND HEADER
+            h(
+              "section",
+              {
+                style: {
+                  position: "relative",
+                  padding: "24px 28px",
+                  borderRadius: "12px",
+                  background: "linear-gradient(135deg, rgba(13, 19, 29, 0.95) 0%, rgba(8, 12, 20, 0.98) 100%)",
+                  border: "1px solid rgba(0, 229, 255, 0.2)",
+                  boxShadow: "0 10px 30px rgba(0,0,0,0.5), inset 0 0 25px rgba(0, 229, 255, 0.05)",
+                  overflow: "hidden",
+                  marginBottom: "8px"
+                }
+              },
+              // Top Neon Gradient Accent Line
+              h("div", {
+                style: {
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: "2px",
+                  background: "linear-gradient(90deg, var(--neon-cyan), var(--neon-purple), var(--emerald-400))",
+                  boxShadow: "0 0 12px rgba(0, 229, 255, 0.6)"
+                }
+              }),
 
-            <PcapUploader
-              selectedFile={selectedFile}
-              onFileSelected={handleFileSelected}
-              onClearFile={handleClearFile}
-              onAnalyze={handleAnalyze}
-              isAnalyzing={isAnalyzing}
-            />
+              h(
+                "div",
+                {
+                  style: {
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-end",
+                    flexWrap: "wrap",
+                    gap: "20px"
+                  }
+                },
+                h(
+                  "div",
+                  null,
+                  h(
+                    "div",
+                    {
+                      style: {
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        marginBottom: "8px"
+                      }
+                    },
+                    h(
+                      "span",
+                      {
+                        style: {
+                          color: "var(--neon-cyan)",
+                          letterSpacing: "2px",
+                          fontSize: "11px",
+                          fontWeight: "700",
+                          fontFamily: "var(--font-mono)"
+                        }
+                      },
+                      currentMeta.eyebrow
+                    ),
+                    h(
+                      "span",
+                      {
+                        style: {
+                          fontSize: "9px",
+                          fontFamily: "var(--font-mono)",
+                          color: "var(--neon-purple)",
+                          border: "1px solid rgba(187, 134, 252, 0.35)",
+                          background: "rgba(187, 134, 252, 0.08)",
+                          padding: "2px 6px",
+                          borderRadius: "4px",
+                          letterSpacing: "1px"
+                        }
+                      },
+                      currentMeta.badge
+                    )
+                  ),
+                  h(
+                    "h1",
+                    {
+                      style: {
+                        color: "var(--text-primary)",
+                        fontSize: "2.35rem",
+                        fontWeight: "800",
+                        letterSpacing: "-1px",
+                        margin: 0,
+                        textShadow: "0 2px 10px rgba(0,0,0,0.6)"
+                      }
+                    },
+                    currentMeta.title
+                  ),
+                  h(
+                    "p",
+                    {
+                      style: {
+                        color: "var(--text-secondary)",
+                        fontSize: "14px",
+                        marginTop: "8px",
+                        marginBottom: 0
+                      }
+                    },
+                    currentMeta.subtitle
+                  )
+                ),
 
-            {isAnalyzing && <AnalysisLoading />}
+                // Right-Side Live Node Telemetry Box
+                h(
+                  "div",
+                  {
+                    style: {
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "20px",
+                      background: "rgba(0,0,0,0.45)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      borderLeft: `3px solid ${statusColor}`,
+                      padding: "12px 18px",
+                      borderRadius: "8px"
+                    }
+                  },
+                  h(
+                    "div",
+                    { style: { textAlign: "right" } },
+                    h(
+                      "div",
+                      {
+                        style: {
+                          fontSize: "10px",
+                          color: "var(--text-muted)",
+                          letterSpacing: "1.5px",
+                          fontWeight: "700",
+                          fontFamily: "var(--font-mono)",
+                          marginBottom: "4px"
+                        }
+                      },
+                      "ANALYZER NODE"
+                    ),
+                    h(
+                      "div",
+                      {
+                        style: {
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "flex-end",
+                          gap: "8px"
+                        }
+                      },
+                      h("span", {
+                        style: {
+                          width: "10px",
+                          height: "10px",
+                          borderRadius: "50%",
+                          background: statusColor,
+                          boxShadow: statusGlow,
+                          display: "inline-block"
+                        }
+                      }),
+                      h(
+                        "strong",
+                        {
+                          style: {
+                            fontSize: "18px",
+                            fontFamily: "var(--font-mono)",
+                            fontWeight: "800",
+                            color: statusColor,
+                            textShadow: statusGlow,
+                            letterSpacing: "1px"
+                          }
+                        },
+                        isOnline ? "READY" : "STANDBY"
+                      )
+                    )
+                  )
+                )
+              )
+            ),
 
-            <ErrorBanner message={analysisError} />
+            h(PcapUploader, {
+              selectedFile: selectedFile,
+              onFileSelected: handleFileSelected,
+              onClearFile: handleClearFile,
+              onAnalyze: handleAnalyze,
+              isAnalyzing: isAnalyzing,
+            }),
 
-            {r ? (
-              <div className="dashboard-grid">
-                
-                {activeView === "overview" && (
-                  <>
-                    <div className="full-width"><StatsRow summary={r.capture_summary} ipsec={r.ipsec} /></div>
-                    <SecurityGauge security={r.security} />
-                    <EvidencePosture ipsec={r.ipsec} traffic={r.traffic} findings={r.security.findings} />
-                    <TrafficClassification traffic={r.traffic} />
-                    <div className="full-width"><IpsecDetails ipsec={r.ipsec} /></div>
-                    <div className="full-width report-section">
-                      <ReportButton onDownload={handleDownloadReport} isGenerating={isGeneratingReport} error={reportError} />
-                    </div>
-                  </>
-                )}
+            isAnalyzing ? h(AnalysisLoading) : null,
 
-                {activeView === "protocol-scan" && (
-                  <div className="full-width">
-                    <ProtocolScanView summary={r.capture_summary} ipsec={r.ipsec} />
-                  </div>
-                )}
+            h(ErrorBanner, { message: analysisError }),
 
-                {activeView === "risk-findings" && (
-                  <div className="full-width">
-                    <ThreatMatrixView security={r.security} />
-                  </div>
-                )}
+            r
+              ? h(
+                  "div",
+                  { className: "dashboard-grid" },
+                  activeView === "overview"
+                    ? h(
+                        React.Fragment,
+                        null,
+                        h(
+                          "div",
+                          { className: "full-width" },
+                          h(StatsRow, { summary: r.capture_summary, ipsec: r.ipsec })
+                        ),
+                        h(SecurityGauge, { security: r.security }),
+                        h(EvidencePosture, {
+                          ipsec: r.ipsec,
+                          traffic: r.traffic,
+                          findings: r.security.findings,
+                        }),
+                        h(TrafficClassification, { traffic: r.traffic }),
+                        h(
+                          "div",
+                          { className: "full-width" },
+                          h(IpsecDetails, { ipsec: r.ipsec })
+                        ),
+                        h(
+                          "div",
+                          { className: "full-width report-section" },
+                          h(ReportButton, {
+                            onDownload: handleDownloadReport,
+                            isGenerating: isGeneratingReport,
+                            error: reportError,
+                          })
+                        )
+                      )
+                    : null,
 
-              </div>
-            ) : (
-              !isAnalyzing && activeView !== "overview" && <EmptyState />
-            )}
-          </>
-        )}
-      </main>
-    </div>
+                  activeView === "protocol-scan"
+                    ? h(
+                        "div",
+                        { className: "full-width" },
+                        h(ProtocolScanView, {
+                          summary: r.capture_summary,
+                          ipsec: r.ipsec,
+                        })
+                      )
+                    : null,
+
+                  activeView === "risk-findings"
+                    ? h(
+                        "div",
+                        { className: "full-width" },
+                        h(ThreatMatrixView, { security: r.security })
+                      )
+                    : null
+                )
+              : !isAnalyzing
+              ? h(EmptyState, { activeView })
+              : null
+          )
+    )
   );
 }
 
