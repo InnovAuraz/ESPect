@@ -427,9 +427,14 @@ export default function LiveCaptureView({
   onStartCapture,
   onStopCapture: parentStopCapture,
   onDownload,
+  onAnalyze,
 }) {
   const isRunning = session?.is_running || false;
   const [isCaptureComplete, setIsCaptureComplete] = useState(false);
+
+  const captureStatusComplete = session?.capture_status === "completed";
+
+  const canAnalyzeCapture = !isRunning && isCaptureComplete && captureStatusComplete;
 
   const [downloadState, setDownloadState] = useState("idle");
   const [exportState, setExportState] = useState("idle");
@@ -570,6 +575,21 @@ export default function LiveCaptureView({
     ]);
     if (parentStopRef.current) {
       parentStopRef.current();
+    }
+  };
+
+  const handleAnalyzeClick = () => {
+    if (!canAnalyzeCapture) {
+      return;
+    }
+
+    setLogs((l) => [
+      ...l,
+      "[SYS] Starting analysis of completed real PCAP...",
+    ]);
+
+    if (onAnalyze) {
+      onAnalyze();
     }
   };
 
@@ -948,7 +968,16 @@ export default function LiveCaptureView({
           h("input", {
             type: "number",
             value: duration,
-            onChange: (e) => setDuration(e.target.value),
+            onChange: (e) => {
+              const value = Number(e.target.value);
+
+              if (!Number.isFinite(value)) {
+                setDuration(5);
+                return;
+              }
+
+              setDuration(Math.max(5, Math.min(120, value)));
+            },
             disabled: isRunning,
             min: "5",
             max: "120",
@@ -969,6 +998,59 @@ export default function LiveCaptureView({
         )
       ),
       h(
+        "button",
+        {
+          type: "button",
+          onClick: handleAnalyzeClick,
+          onMouseEnter: () => setHoveredBtn("analyze"),
+          onMouseLeave: () => setHoveredBtn(null),
+          disabled: !canAnalyzeCapture || isMutating,
+          style: {
+            width: "170px",
+            height: "52px",
+            padding: "12px 18px",
+            borderRadius: "6px",
+
+            background: canAnalyzeCapture
+              ? "rgba(0,255,163,0.12)"
+              : "transparent",
+
+            border: canAnalyzeCapture
+              ? "1px solid var(--emerald-400)"
+              : "1px solid transparent",
+
+            color: canAnalyzeCapture
+              ? "var(--emerald-400)"
+              : "transparent",
+
+            fontWeight: "700",
+            letterSpacing: "0.5px",
+
+            cursor: canAnalyzeCapture
+              ? "pointer"
+              : "default",
+
+            visibility: canAnalyzeCapture
+              ? "visible"
+              : "hidden",
+
+            opacity: canAnalyzeCapture ? 1 : 0,
+
+            transition: "all 0.25s ease",
+
+            transform:
+              hoveredBtn === "analyze"
+                ? "translateY(-2px)"
+                : "translateY(0)",
+
+            boxShadow: canAnalyzeCapture
+              ? "var(--shadow-glow-emerald)"
+              : "none",
+          },
+        },
+        "▶ ANALYZE NOW"
+      ),
+      h(
         "div",
         {
           style: {
@@ -980,6 +1062,7 @@ export default function LiveCaptureView({
             boxShadow: "inset 0 0 20px rgba(0,0,0,0.5)",
           },
         },
+        
         h(
           "div",
           {

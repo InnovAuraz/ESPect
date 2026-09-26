@@ -1,12 +1,12 @@
 {
   "mode": "targeted",
-  "traffic_type": "web",
-  "duration": 15.0,
-  "session_id": 2,
-  "updated_at": 1790418380.2258499,
+  "traffic_type": "video",
+  "duration": 15,
+  "session_id": 16,
+  "updated_at": 1790436150.9128144,
   "encryption": "aes128-gcm16",
   "integrity": "none-aead",
   "pfs": true,
-  "pcap_sha256": "02c0e89d4b3f10fcf577030fafa3a8245ecc434579fcd1e66871fc97b8cdc0d4",
-  "pcap_size": 1783250
+  "pcap_sha256": "02d0830ff079ef96e55db72ef36375d21ca52498309ac9063708180c96e02a4b",
+  "pcap_size": 659672
 }

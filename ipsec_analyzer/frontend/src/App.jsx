@@ -53,6 +53,8 @@ function App() {
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [reportError, setReportError] = useState(null);
   const [activeView, setActiveView] = useState("overview");
+  const [isRailCollapsed, setIsRailCollapsed] = useState(typeof window !== "undefined" && window.innerWidth <= 1200);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   
   const [captureSession, setCaptureSession] = useState(null);
   const [captureError, setCaptureError] = useState(null);
@@ -88,6 +90,24 @@ function App() {
   }, []);
 
   useEffect(() => {
+    function handleRailResize() {
+      if (window.innerWidth <= 1200) {
+        setIsRailCollapsed(true);
+      } else {
+        setIsRailCollapsed(false);
+      }
+    }
+
+    handleRailResize();
+
+    window.addEventListener("resize", handleRailResize);
+
+    return () => {
+      window.removeEventListener("resize", handleRailResize);
+    };
+  }, []);
+
+  useEffect(() => {
     let ignore = false;
     checkHealth()
       .then(() => { if (!ignore) setBackendStatus("online"); })
@@ -110,47 +130,47 @@ function App() {
     };
   }, [activeView, refreshCaptureSession]);
 
-  useEffect(() => {
-    if (
-      activeView !== "live-capture" ||
-      !captureRunRequested.current ||
-      captureSession?.capture_status !== "completed" ||
-      autoAnalyzedCapture.current
-    ) {
-      return undefined;
-    }
+  // useEffect(() => {
+  //   if (
+  //     activeView !== "live-capture" ||
+  //     !captureRunRequested.current ||
+  //     captureSession?.capture_status !== "completed" ||
+  //     autoAnalyzedCapture.current
+  //   ) {
+  //     return undefined;
+  //   }
 
-    autoAnalyzedCapture.current = true;
-    let cancelled = false;
+  //   autoAnalyzedCapture.current = true;
+  //   let cancelled = false;
 
-    async function analyzeCompletedCapture() {
-      setIsAnalyzing(true);
-      setCaptureError(null);
-      try {
-        const result = await analyzeLiveCapture();
-        if (cancelled) return;
+  //   async function analyzeCompletedCapture() {
+  //     setIsAnalyzing(true);
+  //     setCaptureError(null);
+  //     try {
+  //       const result = await analyzeLiveCapture();
+  //       if (cancelled) return;
 
-        const { blob, filename } = await downloadCaptureSession();
-        const file = new File([blob], filename, { type: "application/vnd.tcpdump.pcap" });
+  //       const { blob, filename } = await downloadCaptureSession();
+  //       const file = new File([blob], filename, { type: "application/vnd.tcpdump.pcap" });
         
-        setSelectedFile(file);
-        setAnalysisResult(result);
-        setActiveView("overview");
-      } catch (error) {
-        if (!cancelled) {
-          autoAnalyzedCapture.current = false;
-          setCaptureError(error.message || "Automatic PCAP analysis failed.");
-        }
-      } finally {
-        if (!cancelled) setIsAnalyzing(false);
-      }
-    }
+  //       setSelectedFile(file);
+  //       setAnalysisResult(result);
+  //       setActiveView("overview");
+  //     } catch (error) {
+  //       if (!cancelled) {
+  //         autoAnalyzedCapture.current = false;
+  //         setCaptureError(error.message || "Automatic PCAP analysis failed.");
+  //       }
+  //     } finally {
+  //       if (!cancelled) setIsAnalyzing(false);
+  //     }
+  //   }
 
-    void analyzeCompletedCapture();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeView, captureSession?.capture_status]);
+  //   void analyzeCompletedCapture();
+  //   return () => {
+  //     cancelled = true;
+  //   };
+  // }, [activeView, captureSession?.capture_status]);
 
   async function handleCaptureAction(action, options = {}) {
     setIsMutatingCapture(true);
@@ -187,6 +207,36 @@ function App() {
       setIsMutatingCapture(false);
     }
   }
+
+  async function handleAnalyzeLiveCapture() {
+  if (isAnalyzing) return;
+
+  setIsAnalyzing(true);
+  setCaptureError(null);
+  setAnalysisError(null);
+
+  try {
+    const result = await analyzeLiveCapture();
+
+    const { blob, filename } = await downloadCaptureSession();
+
+    const file = new File(
+      [blob],
+      filename,
+      { type: "application/vnd.tcpdump.pcap" }
+    );
+
+    setSelectedFile(file);
+    setAnalysisResult(result);
+    setActiveView("overview");
+  } catch (error) {
+    setAnalysisError(
+      error.message || "Live PCAP analysis failed."
+    );
+  } finally {
+    setIsAnalyzing(false);
+  }
+}
 
   function handleFileSelected(file) {
     setSelectedFile(file);
@@ -242,8 +292,15 @@ function App() {
 
   return (
     <div className="app-shell">
-      <aside className="command-rail">
-        <div className="rail-mark">E</div>
+      <aside className={`command-rail ${sidebarOpen ? "open" : ""}`}>
+        <button
+          type="button"
+          className="rail-mark"
+          onClick={() => setSidebarOpen((value) => !value)}
+          aria-label={sidebarOpen ? "collapse sidebar" : "Expand sidebar"}
+        >
+          E
+        </button>
         <div className="rail-brand">ESPECT<span>OPS CONSOLE</span></div>
         <nav className="rail-nav" aria-label="Primary navigation">
           {navItems.map((item) => (
@@ -276,6 +333,7 @@ function App() {
             onStartCapture={(options) => handleCaptureAction("start", options)}
             onStopCapture={() => handleCaptureAction("stop")}
             onDownload={handleDownloadCapture}
+            onAnalyze={handleAnalyzeLiveCapture}
           />
         ) : activeView === "startup-guide" ? (
           <StartupGuide />
