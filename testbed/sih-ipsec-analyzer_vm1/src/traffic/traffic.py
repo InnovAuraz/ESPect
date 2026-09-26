@@ -219,13 +219,6 @@ def command(traffic_type: str, role: str, target: str, duration: float | None = 
 
     return args
 
-    # if duration is not None:
-    #     if duration <= 0:
-    #         raise TrafficError("Traffic duration must be greater than zero")
-    #     args += ["--duration", str(duration)]
-
-    # return args
-
 
 def run(traffic_type: str, role: str, target: str, duration: float | None = None) -> None:
     args = command(traffic_type, role, target, duration=duration)
@@ -243,22 +236,36 @@ def run(traffic_type: str, role: str, target: str, duration: float | None = None
 # ---------------------------------------------------------------------------
 
 
-def _run_icmp(role: str, target: str) -> None:
+def _run_icmp(role: str, target: str, duration: float | None = None) -> None:
     if role == "receiver":
         # ICMP is handled by the kernel; the receiver simply remains alive long
         # enough for the sender's request/reply exchange to finish.
-        time.sleep(ICMP_COUNT * ICMP_INTERVAL + ICMP_RECEIVER_GRACE)
+        receiver_duration = (
+            ICMP_COUNT * ICMP_INTERVAL
+            if duration is None
+            else duration
+        )
+        time.sleep(receiver_duration + ICMP_RECEIVER_GRACE)
         return
 
     if role == "peer":
         raise TrafficError("ICMP does not support the peer role")
 
     family = _family(target)
+
+    if duration is None:
+        ping_count = ICMP_COUNT
+    else:
+        ping_count = max(
+            1,
+            int(duration / ICMP_INTERVAL),
+        )
+
     args = [
         "ping",
         "-q",
         "-c",
-        str(ICMP_COUNT),
+        str(ping_count),
         "-i",
         str(ICMP_INTERVAL),
         "-s",
@@ -365,7 +372,8 @@ def _create_http_server(family: int) -> ThreadingHTTPServer:
     return server
 
 
-def _web_receiver(target: str) -> None:
+
+def _web_receiver(target: str, duration: float | None = None) -> None:
     family = _family(target)
     server = _create_http_server(family)
 
@@ -380,10 +388,17 @@ def _web_receiver(target: str) -> None:
     thread.start()
 
     try:
-        if not complete.wait(timeout=WEB_RECEIVER_TIMEOUT):
-            raise TrafficError(
-                f"Web sender completed only {counter['count']}/{WEB_REQUESTS} requests"
-            )
+        if duration is None:
+            if not complete.wait(timeout=WEB_RECEIVER_TIMEOUT):
+                raise TrafficError(
+                    f"Web sender completed only {counter['count']}/{WEB_REQUESTS} requests"
+                )
+        else:
+            deadline = time.monotonic() + duration + WEB_RECEIVER_TIMEOUT
+            while time.monotonic() < deadline:
+                remaining = deadline - time.monotonic()
+                if complete.wait(timeout=min(0.5, remaining)):
+                    break
     finally:
         server.shutdown()
         server.server_close()
@@ -393,7 +408,8 @@ def _web_receiver(target: str) -> None:
         _WebHandler.request_event = None
 
 
-def _web_sender(target: str) -> None:
+
+def _web_sender(target: str, duration: float | None = None) -> None:
     family = _family(target)
     host = f"[{target}]" if family == socket.AF_INET6 else target
     base = f"http://{host}:{WEB_PORT}"
@@ -409,7 +425,10 @@ def _web_sender(target: str) -> None:
         "/assets/data.bin",
     ]
 
-    for number in range(WEB_REQUESTS):
+    start = time.monotonic()
+    number = 0
+
+    while duration is None or time.monotonic() < start + duration:
         if number > 0:
             time.sleep(random.uniform(WEB_MIN_DELAY, WEB_MAX_DELAY))
 
@@ -445,6 +464,7 @@ def _web_sender(target: str) -> None:
                     time.sleep(WEB_CONNECT_RETRY_DELAY)
             if last_error is not None:
                 raise TrafficError("Web receiver was not reachable") from last_error
+        number += 1
 
 
 # ---------------------------------------------------------------------------
@@ -484,17 +504,33 @@ def _email_body(number: int) -> bytes:
     return message
 
 
-def _email_receiver(target: str) -> None:
+def _email_receiver(target: str, duration: float | None = None) -> None:
     family = _family(target)
     server = socket.socket(family, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.settimeout(EMAIL_SOCKET_TIMEOUT)
     server.bind(_bind_address(family, EMAIL_PORT))
     server.listen(2)
 
+    deadline = None if duration is None else time.monotonic() + duration
+
     try:
-        for _ in range(EMAIL_MESSAGES):
-            connection, _ = server.accept()
+        number = 0
+        while duration is None or time.monotonic() < deadline:
+            if deadline is None:
+                server.settimeout(EMAIL_SOCKET_TIMEOUT)
+            else:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                server.settimeout(min(EMAIL_SOCKET_TIMEOUT, remaining))
+
+            try:
+                connection, _ = server.accept()
+            except socket.timeout:
+                if deadline is not None and time.monotonic() >= deadline:
+                    break
+                raise TrafficError("Email sender did not connect or complete")
+
             with connection:
                 connection.settimeout(EMAIL_SOCKET_TIMEOUT)
                 connection.sendall(b"220 ESPect SMTP\r\n")
@@ -518,6 +554,7 @@ def _email_receiver(target: str) -> None:
                 quit_data = connection.recv(4096)
                 if quit_data and b"QUIT" in quit_data.upper():
                     connection.sendall(b"221 2.0.0 Bye\r\n")
+                number += 1
     except socket.timeout as exc:
         raise TrafficError("Email sender did not connect or complete") from exc
     except OSError as exc:
@@ -526,12 +563,19 @@ def _email_receiver(target: str) -> None:
         server.close()
 
 
-def _email_sender(target: str) -> None:
+def _email_sender(
+    target: str,
+    duration: float | None = None,
+) -> None:
     family = _family(target)
+    start = time.monotonic()
+    number = 0
 
-    for number in range(EMAIL_MESSAGES):
+    while duration is None or time.monotonic() < start + duration:
         if number:
             time.sleep(random.uniform(*EMAIL_INTER_MESSAGE_DELAY))
+            if duration is not None and time.monotonic() >= start + duration:
+                break
 
         connection = _connect_with_retry(
             family,
@@ -560,8 +604,6 @@ def _email_sender(target: str) -> None:
                 raise TrafficError("SMTP DATA response missing")
 
             message = _email_body(number)
-            # Deliberately send this in a few chunks: email is a bursty TCP
-            # transfer, not a single fixed-size datagram-like pattern.
             split = max(1, len(message) // 3)
             connection.sendall(message[:split])
             time.sleep(0.015)
@@ -578,6 +620,8 @@ def _email_sender(target: str) -> None:
             raise TrafficError("Email traffic failed") from exc
         finally:
             connection.close()
+
+        number += 1
 
 
 # ---------------------------------------------------------------------------
@@ -781,30 +825,49 @@ def _whatsapp_message(number: int) -> bytes:
     return bytes(message[:target_size])
 
 
-def _whatsapp_receiver(target: str) -> None:
+def _whatsapp_receiver(
+    target: str,
+    duration: float | None = None,
+) -> None:
     family = _family(target)
     server = socket.socket(family, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.settimeout(WHATSAPP_SOCKET_TIMEOUT)
     server.bind(_bind_address(family, WHATSAPP_PORT))
     server.listen(1)
 
-    try:
-        connection, _ = server.accept()
-        with connection:
-            connection.settimeout(WHATSAPP_SOCKET_TIMEOUT)
-            for _ in range(WHATSAPP_MESSAGES):
-                raw_length = _recv_exact(connection, WHATSAPP_LENGTH_PREFIX_SIZE)
-                message_length = int.from_bytes(raw_length, "big")
-                if not (
-                    WHATSAPP_MIN_MESSAGE_SIZE
-                    <= message_length
-                    <= WHATSAPP_MAX_MESSAGE_SIZE
-                ):
-                    raise TrafficError("Invalid messaging payload length")
+    deadline = None if duration is None else time.monotonic() + duration
 
-                _recv_exact(connection, message_length)
-                connection.sendall(b"ACK")
+    try:
+        while duration is None or time.monotonic() < deadline:
+            if deadline is None:
+                server.settimeout(WHATSAPP_SOCKET_TIMEOUT)
+            else:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                server.settimeout(min(WHATSAPP_SOCKET_TIMEOUT, remaining))
+
+            try:
+                connection, _ = server.accept()
+            except socket.timeout:
+                if deadline is not None and time.monotonic() >= deadline:
+                    break
+                raise TrafficError("Messaging peer did not connect or complete")
+
+            with connection:
+                connection.settimeout(WHATSAPP_SOCKET_TIMEOUT)
+                while duration is None or time.monotonic() < deadline:
+                    raw_length = _recv_exact(connection, WHATSAPP_LENGTH_PREFIX_SIZE)
+                    message_length = int.from_bytes(raw_length, "big")
+                    if not (
+                        WHATSAPP_MIN_MESSAGE_SIZE
+                        <= message_length
+                        <= WHATSAPP_MAX_MESSAGE_SIZE
+                    ):
+                        raise TrafficError("Invalid messaging payload length")
+
+                    _recv_exact(connection, message_length)
+                    connection.sendall(b"ACK")
     except socket.timeout as exc:
         raise TrafficError(
             "Messaging peer did not connect or complete"
@@ -815,7 +878,10 @@ def _whatsapp_receiver(target: str) -> None:
         server.close()
 
 
-def _whatsapp_sender(target: str) -> None:
+def _whatsapp_sender(
+    target: str,
+    duration: float | None = None,
+) -> None:
     family = _family(target)
     connection = _connect_with_retry(
         family,
@@ -826,18 +892,25 @@ def _whatsapp_sender(target: str) -> None:
         "Messaging receiver",
     )
 
+    start = time.monotonic()
+    number = 0
+
     try:
         connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         connection.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
 
-        for number in range(WHATSAPP_MESSAGES):
+        while duration is None or time.monotonic() < start + duration:
             time.sleep(random.uniform(WHATSAPP_MIN_DELAY, WHATSAPP_MAX_DELAY))
+            if duration is not None and time.monotonic() >= start + duration:
+                break
+
             message = _whatsapp_message(number)
             connection.sendall(len(message).to_bytes(4, "big"))
             connection.sendall(message)
 
             if connection.recv(16) != b"ACK":
                 raise TrafficError("Messaging acknowledgement missing")
+            number += 1
     except OSError as exc:
         raise TrafficError("Messaging traffic failed") from exc
     finally:
@@ -856,23 +929,23 @@ def _run_profile(
     duration: float | None = None,
 ) -> None:
     if traffic_type == "icmp":
-        _run_icmp(role, target)
+        _run_icmp(role, target, duration=duration)
         return
 
     if traffic_type == "web":
         if role == "sender":
-            _web_sender(target)
+            _web_sender(target, duration=duration)
         elif role == "receiver":
-            _web_receiver(target)
+            _web_receiver(target, duration=duration)
         else:
             raise TrafficError("Web supports sender/receiver roles only")
         return
 
     if traffic_type == "email":
         if role == "sender":
-            _email_sender(target)
+            _email_sender(target, duration=duration)
         elif role == "receiver":
-            _email_receiver(target)
+            _email_receiver(target, duration=duration)
         else:
             raise TrafficError("Email supports sender/receiver roles only")
         return
@@ -894,9 +967,9 @@ def _run_profile(
 
     if traffic_type == "whatsapp":
         if role == "sender":
-            _whatsapp_sender(target)
+            _whatsapp_sender(target, duration=duration)
         elif role == "receiver":
-            _whatsapp_receiver(target)
+            _whatsapp_receiver(target, duration=duration)
         else:
             raise TrafficError(
                 "WhatsApp traffic supports sender/receiver roles only"
